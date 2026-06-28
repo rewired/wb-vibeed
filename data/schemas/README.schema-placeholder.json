@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/wb-vibeed/schema-placeholder.json",
+  "title": "Schema Placeholder",
+  "description": "Replace with concrete validation schemas during Iteration 0.",
+  "type": "object"
+}

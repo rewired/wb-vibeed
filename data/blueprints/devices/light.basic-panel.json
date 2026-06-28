@@ -1,0 +1,12 @@
+{
+  "id": "device.light.basic-panel",
+  "role": "light",
+  "label": "Basic Panel Light",
+  "iteration": 1,
+  "abstractEffects": {
+    "energyCostIndex": 2,
+    "stabilityLoad": 1,
+    "growthSupport": 1
+  },
+  "safetyNote": "Abstract game values only. Not a real-world device specification."
+}

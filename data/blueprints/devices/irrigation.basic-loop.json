@@ -1,0 +1,12 @@
+{
+  "id": "device.irrigation.basic-loop",
+  "role": "irrigation",
+  "label": "Basic Irrigation Loop",
+  "iteration": 1,
+  "abstractEffects": {
+    "operatingCostIndex": 1,
+    "waterSupport": 2,
+    "stabilityRisk": 1
+  },
+  "safetyNote": "Abstract game values only. Not a real-world device specification."
+}

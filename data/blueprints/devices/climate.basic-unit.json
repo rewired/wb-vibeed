@@ -1,0 +1,12 @@
+{
+  "id": "device.climate.basic-unit",
+  "role": "climate",
+  "label": "Basic Climate Unit",
+  "iteration": 1,
+  "abstractEffects": {
+    "energyCostIndex": 2,
+    "stabilitySupport": 2,
+    "driftReduction": 1
+  },
+  "safetyNote": "Abstract game values only. Not a real-world device specification."
+}

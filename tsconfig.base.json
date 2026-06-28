@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@wb/shared": ["packages/shared/src/index.ts"],
+      "@wb/engine": ["packages/engine/src/index.ts"],
+      "@wb/facade": ["packages/facade/src/index.ts"],
+      "@wb/tools": ["packages/tools/src/index.ts"]
+    }
+  }
+}

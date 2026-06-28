@@ -1,0 +1,32 @@
+{
+  "id": "world.single-room-demo",
+  "label": "Single Room Demo",
+  "company": {
+    "id": "company.demo",
+    "name": "Demo Operator"
+  },
+  "structure": {
+    "id": "structure.demo",
+    "name": "North Unit"
+  },
+  "room": {
+    "id": "room.demo.01",
+    "name": "Room 01",
+    "sizeClass": "small"
+  },
+  "zone": {
+    "id": "zone.demo.01",
+    "name": "Zone A",
+    "roomId": "room.demo.01"
+  },
+  "batch": {
+    "id": "batch.demo.001",
+    "label": "Batch 001 / Vibe Line",
+    "plantLineId": "plant-line.vibe-01"
+  },
+  "devices": [
+    "device.light.basic-panel",
+    "device.climate.basic-unit",
+    "device.irrigation.basic-loop"
+  ]
+}

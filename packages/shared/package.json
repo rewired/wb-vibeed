@@ -1,0 +1,14 @@
+{
+  "name": "@wb/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "echo \"No tests yet for @wb/shared\"",
+    "lint": "echo \"No lint configured yet for @wb/shared\""
+  }
+}

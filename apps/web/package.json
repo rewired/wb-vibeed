@@ -1,0 +1,27 @@
+{
+  "name": "@wb/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "echo \"No tests yet for @wb/web\"",
+    "lint": "echo \"No lint configured yet for @wb/web\""
+  },
+  "dependencies": {
+    "@wb/engine": "workspace:*",
+    "@wb/facade": "workspace:*",
+    "@wb/shared": "workspace:*",
+    "@vitejs/plugin-react": "latest",
+    "vite": "latest",
+    "typescript": "^5.8.0",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest"
+  }
+}

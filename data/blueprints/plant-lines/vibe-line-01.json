@@ -1,0 +1,13 @@
+{
+  "id": "plant-line.vibe-01",
+  "label": "Vibe Line 01",
+  "iteration": 1,
+  "fictional": true,
+  "abstractProfile": {
+    "difficulty": 2,
+    "growthBias": 1,
+    "qualityBias": 1,
+    "stressSensitivity": 2
+  },
+  "safetyNote": "Fictional game line. Not based on real strains or cultivation data."
+}
