@@ -1,0 +1,336 @@
+import type {
+  BlueprintMetric,
+  CapacityCount,
+  MetricTileState,
+  OperationsCockpitBlueprint,
+  OperationsCockpitRuntimeState,
+  ProgressTileState,
+  RoomCapacityItemState,
+  RoomInventoryItemState,
+  TrendTileState,
+} from './operations-cockpit-state-types';
+
+export function rehydrateOperationsCockpit(
+  blueprint: OperationsCockpitBlueprint,
+): OperationsCockpitRuntimeState {
+  if (blueprint.schemaVersion !== 1) {
+    throw new Error(`Unsupported operations cockpit blueprint schema: ${blueprint.schemaVersion}`);
+  }
+
+  const day = dayFromTick(blueprint.simulation.initialTick, blueprint.simulation.ticksPerDay);
+  const cycleProgress = Math.floor((day / blueprint.batch.cycleLengthDays) * 100);
+  const statusLabel = titleCase(blueprint.batch.status);
+  const telemetry = blueprint.telemetryBase;
+
+  return {
+    simulation: {
+      isRunning: blueprint.simulation.initialRunning,
+      tick: blueprint.simulation.initialTick,
+      speed: blueprint.simulation.initialSpeed,
+      ticksPerDay: blueprint.simulation.ticksPerDay,
+      initialTick: blueprint.simulation.initialTick,
+    },
+    cockpit: {
+      header: {
+        title: 'Operations Cockpit',
+        stats: [
+          { label: 'Room', value: blueprint.room.id },
+          { label: 'Zone', value: blueprint.zone.id },
+          { label: 'Batch', value: blueprint.batch.id },
+          { label: 'Day', value: day },
+          { label: 'Tick', value: blueprint.simulation.initialTick },
+          { label: 'Phase', value: blueprint.batch.phase, status: blueprint.batch.status },
+          { label: 'Overall Status', value: statusLabel, status: blueprint.room.status },
+          { label: 'Power Now', value: blueprint.energy.powerNow, unit: 'kW' },
+          { label: 'Daily Cost', value: blueprint.energy.dailyCost, unit: '$' },
+          { label: 'Speed', value: `${blueprint.simulation.initialSpeed}x` },
+        ],
+      },
+      roomOverview: {
+        title: `${blueprint.room.label} / ${blueprint.zone.label} Overview`,
+        roomId: blueprint.room.id,
+        zoneId: blueprint.zone.id,
+        activeView: '3d',
+        overlays: ['Supply Air', 'Return Air', 'Exhaust', 'Light', 'Irrigation', 'Sensors'],
+        capacity: rehydrateCapacity(blueprint.capacity),
+        inventory: rehydrateInventory(blueprint.capacity),
+      },
+      batchStatus: rehydrateBatchStatus(blueprint, day, cycleProgress),
+      environmentalTelemetry: [
+        metric('air-temperature', 'Air Temperature', telemetry.airTemperature),
+        metric('relative-humidity', 'Relative Humidity', telemetry.relativeHumidity),
+        metric('co2-index', 'CO2 Index', telemetry.co2Index),
+        metric('light-output', 'Light Output', telemetry.lightOutput),
+        metric('irrigation-index', 'Irrigation Index', telemetry.irrigationIndex),
+        metric('airflow', 'Airflow', telemetry.airflow),
+        metric('nutrient-reservoir', 'Nutrient Reservoir', telemetry.nutrientReservoir),
+      ],
+      controls: [
+        {
+          id: 'light-control',
+          label: 'Light',
+          activeMode: blueprint.controls.light.mode,
+          activeControl: blueprint.controls.light.control,
+          primaryTuning: {
+            label: 'Intensity',
+            value: blueprint.controls.light.intensity,
+            unit: '%',
+          },
+        },
+        {
+          id: 'climate-control',
+          label: 'Climate',
+          activeMode: blueprint.controls.climate.mode,
+          activeControl: blueprint.controls.climate.control,
+          primaryTuning: {
+            label: 'Target Bias',
+            value: blueprint.controls.climate.targetBias,
+          },
+        },
+        {
+          id: 'irrigation-control',
+          label: 'Irrigation',
+          activeMode: blueprint.controls.irrigation.mode,
+          activeControl: blueprint.controls.irrigation.control,
+          primaryTuning: {
+            label: 'Irrigation Index',
+            value: blueprint.controls.irrigation.irrigationIndex,
+            unit: '%',
+          },
+        },
+      ],
+      telemetryTrends: rehydrateTelemetryTrends(blueprint),
+      eventLog: blueprint.eventLog.map((entry, index) => ({
+        id: `evt-${index + 1}-${entry.tick}-${slug(entry.title)}`,
+        time: clockFromTick(entry.tick, blueprint.simulation.ticksPerDay),
+        ...entry,
+      })),
+      energyCost: [
+        {
+          id: 'power-now',
+          label: 'Power Now',
+          value: blueprint.energy.powerNow,
+          unit: 'kW',
+          status: 'normal',
+        },
+        {
+          id: 'daily-energy',
+          label: 'Daily Energy',
+          value: blueprint.energy.dailyEnergy,
+          unit: 'kWh',
+          status: 'normal',
+        },
+        {
+          id: 'daily-cost',
+          label: 'Daily Cost',
+          value: blueprint.energy.dailyCost,
+          unit: '$',
+          status: 'normal',
+        },
+        {
+          id: 'weekly-cost',
+          label: 'Weekly Cost',
+          value: blueprint.energy.weeklyCost,
+          unit: '$',
+          status: 'normal',
+        },
+        {
+          id: 'efficiency',
+          label: 'Efficiency',
+          value: blueprint.energy.efficiencyScore,
+          unit: 'score',
+          status: 'normal',
+        },
+      ],
+      utilityStatus: [
+        { id: 'grid-status', label: 'Grid', ...blueprint.utilityStatus.grid },
+        { id: 'backup-power', label: 'Backup Power', ...blueprint.utilityStatus.backupPower },
+        { id: 'water-supply', label: 'Water Supply', ...blueprint.utilityStatus.waterSupply },
+        { id: 'network', label: 'Network', ...blueprint.utilityStatus.network },
+      ],
+    },
+  };
+}
+
+function rehydrateCapacity(capacity: OperationsCockpitBlueprint['capacity']): RoomCapacityItemState[] {
+  return [
+    {
+      id: 'canopy-tables',
+      label: 'Canopy Tables',
+      value: `${capacity.canopyTables.active ?? 0} / ${capacity.canopyTables.total} Active`,
+      icon: 'table_rows',
+    },
+    {
+      id: 'light-rails',
+      label: 'Light Rails',
+      value: `${capacity.lightRails.online ?? 0} Online`,
+      icon: 'lightbulb',
+    },
+    {
+      id: 'circulation-fans',
+      label: 'Circulation Fans',
+      value: `${capacity.circulationFans.online ?? 0} Online`,
+      icon: 'mode_fan',
+    },
+    {
+      id: 'sensor-points',
+      label: 'Sensor Points',
+      value: `${capacity.sensorPoints.online ?? 0} Online`,
+      icon: 'sensors',
+    },
+  ];
+}
+
+function rehydrateInventory(capacity: OperationsCockpitBlueprint['capacity']): RoomInventoryItemState[] {
+  return [
+    inventory('tables', 'Tables', capacity.canopyTables),
+    inventory('light-rails', 'Light Rails', capacity.lightRails),
+    inventory('circulation-fans', 'Circ. Fans', capacity.circulationFans),
+    inventory('exhaust-filters', 'Exhaust Filters', capacity.exhaustFilters),
+    inventory('nutrient-reservoirs', 'Nutrient Res.', capacity.nutrientReservoirs),
+    inventory('control-cabinets', 'Ctrl Cabinets', capacity.controlCabinets),
+    inventory('sensor-points', 'Sensor Points', capacity.sensorPoints),
+  ];
+}
+
+function rehydrateBatchStatus(
+  blueprint: OperationsCockpitBlueprint,
+  day: number,
+  cycleProgress: number,
+): ProgressTileState[] {
+  return [
+    {
+      id: 'cycle-progress',
+      label: 'Cycle Progress',
+      value: cycleProgress,
+      unit: '%',
+      secondary: `Day ${day} of ${blueprint.batch.cycleLengthDays}`,
+      status: blueprint.batch.status,
+    },
+    {
+      id: 'batch-health-index',
+      label: 'Batch Health Index',
+      value: blueprint.batchStatus.healthIndex,
+      unit: '/100',
+      secondary: 'Stable',
+      status: blueprint.batch.status,
+    },
+    {
+      id: 'moisture-balance',
+      label: 'Moisture Balance',
+      value: blueprint.batchStatus.moistureBalance,
+      unit: '%',
+      status: blueprint.batch.status,
+    },
+    {
+      id: 'yield-forecast',
+      label: 'Yield Forecast',
+      value: blueprint.batchStatus.yieldForecast,
+      unit: 'units',
+      status: blueprint.batch.status,
+    },
+    {
+      id: 'quality-estimate',
+      label: 'Quality Estimate',
+      value: blueprint.batchStatus.qualityEstimate,
+      unit: '%',
+      secondary: 'Good',
+      status: blueprint.batch.status,
+    },
+  ];
+}
+
+function rehydrateTelemetryTrends(blueprint: OperationsCockpitBlueprint): TrendTileState[] {
+  const telemetry = blueprint.telemetryBase;
+  const power = blueprint.energy.powerNow;
+
+  return [
+    trend('air-temperature-trend', 'Air Temperature', telemetry.airTemperature.unit, telemetry.airTemperature.value, [
+      -0.7,
+      -0.5,
+      -0.4,
+      -0.2,
+      -0.1,
+      -0.2,
+      0,
+    ]),
+    trend('relative-humidity-trend', 'Relative Humidity', telemetry.relativeHumidity.unit, telemetry.relativeHumidity.value, [
+      -3,
+      -2,
+      -1,
+      1,
+      2,
+      0,
+      0,
+    ]),
+    trend('irrigation-moisture-trend', 'Irrigation / Moisture', telemetry.irrigationIndex.unit, telemetry.irrigationIndex.value, [
+      3,
+      1,
+      0,
+      -2,
+      -1,
+      0,
+      0,
+    ]),
+    trend('power-draw-trend', 'Power Draw', 'kW', power, [-1.8, -1.4, -0.5, 0, 0.4, -0.2, 0]),
+  ];
+}
+
+function metric(id: string, label: string, source: BlueprintMetric): MetricTileState {
+  return {
+    id,
+    label,
+    value: source.value,
+    unit: source.unit,
+    reference: source.reference,
+    status: source.status,
+  };
+}
+
+function trend(id: string, label: string, unit: string, currentValue: number, offsets: number[]): TrendTileState {
+  return {
+    id,
+    label,
+    unit,
+    currentValue,
+    range: '24h',
+    points: offsets.map((offset) => round(currentValue + offset, unit === '°C' || unit === 'kW' ? 1 : 0)),
+  };
+}
+
+function inventory(id: string, label: string, item: CapacityCount): RoomInventoryItemState {
+  return {
+    id,
+    label,
+    value: String(item.total),
+  };
+}
+
+function dayFromTick(tick: number, ticksPerDay: number) {
+  return Math.floor(tick / ticksPerDay) + 1;
+}
+
+function clockFromTick(tick: number, ticksPerDay: number) {
+  const minutesPerTick = Math.floor((24 * 60) / ticksPerDay);
+  const minutes = (tick % ticksPerDay) * minutesPerTick;
+  const hours = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${padTime(hours)}:${padTime(minute)}:00`;
+}
+
+function padTime(value: number) {
+  return String(value).padStart(2, '0');
+}
+
+function round(value: number, digits = 0) {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function slug(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
+
+function titleCase(value: string) {
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+}

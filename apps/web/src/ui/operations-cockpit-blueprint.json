@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 1,
+  "simulation": {
+    "initialTick": 276,
+    "ticksPerDay": 12,
+    "initialSpeed": 2,
+    "initialRunning": false
+  },
+  "room": {
+    "id": "R-01",
+    "label": "Room R-01",
+    "status": "normal"
+  },
+  "zone": {
+    "id": "Z-01",
+    "label": "Zone Z-01",
+    "roomId": "R-01"
+  },
+  "batch": {
+    "id": "B-017",
+    "roomId": "R-01",
+    "zoneId": "Z-01",
+    "phase": "Mid Cycle",
+    "cycleLengthDays": 39,
+    "status": "normal"
+  },
+  "capacity": {
+    "canopyTables": {
+      "active": 6,
+      "total": 6
+    },
+    "lightRails": {
+      "online": 6,
+      "total": 6
+    },
+    "circulationFans": {
+      "online": 2,
+      "total": 2
+    },
+    "sensorPoints": {
+      "online": 6,
+      "total": 6
+    },
+    "exhaustFilters": {
+      "online": 1,
+      "total": 1
+    },
+    "nutrientReservoirs": {
+      "online": 1,
+      "total": 1
+    },
+    "controlCabinets": {
+      "online": 1,
+      "total": 1
+    }
+  },
+  "telemetryBase": {
+    "airTemperature": {
+      "value": 24.6,
+      "unit": "°C",
+      "reference": "Target 24.0 °C",
+      "status": "normal"
+    },
+    "relativeHumidity": {
+      "value": 58,
+      "unit": "%",
+      "reference": "Target 55 %",
+      "status": "normal"
+    },
+    "co2Index": {
+      "value": 1150,
+      "unit": "ppm",
+      "reference": "Target 1200 ppm",
+      "status": "normal"
+    },
+    "lightOutput": {
+      "value": 72,
+      "unit": "%",
+      "reference": "Target 75 %",
+      "status": "normal"
+    },
+    "irrigationIndex": {
+      "value": 46,
+      "unit": "%",
+      "reference": "Target 45 %",
+      "status": "normal"
+    },
+    "airflow": {
+      "value": 68,
+      "unit": "%",
+      "reference": "Target 65 %",
+      "status": "normal"
+    },
+    "nutrientReservoir": {
+      "value": 79,
+      "unit": "%",
+      "reference": "Refill Threshold 20 %",
+      "status": "normal"
+    }
+  },
+  "controls": {
+    "light": {
+      "mode": "Balanced",
+      "control": "Auto",
+      "intensity": 72
+    },
+    "climate": {
+      "mode": "Balanced",
+      "control": "Auto",
+      "targetBias": "Balanced"
+    },
+    "irrigation": {
+      "mode": "Balanced",
+      "control": "Auto",
+      "irrigationIndex": 46
+    }
+  },
+  "batchStatus": {
+    "healthIndex": 78,
+    "moistureBalance": 54,
+    "yieldForecast": 1248,
+    "qualityEstimate": 82
+  },
+  "energy": {
+    "powerNow": 18.6,
+    "dailyEnergy": 447.2,
+    "dailyCost": 152.34,
+    "weeklyCost": 1084.71,
+    "efficiencyScore": 2.41
+  },
+  "utilityStatus": {
+    "grid": {
+      "value": "Normal",
+      "status": "normal"
+    },
+    "backupPower": {
+      "value": "Available",
+      "status": "normal"
+    },
+    "waterSupply": {
+      "value": "Facility Line",
+      "secondary": "Flow Stable",
+      "status": "normal"
+    },
+    "network": {
+      "value": "Connected",
+      "status": "normal"
+    }
+  },
+  "eventLog": [
+    {
+      "day": 24,
+      "tick": 286,
+      "severity": "info",
+      "title": "Irrigation cycle complete.",
+      "detail": "Zone Z-01"
+    },
+    {
+      "day": 24,
+      "tick": 281,
+      "severity": "warning",
+      "title": "Humidity deviation detected.",
+      "detail": "Outside target band for 12 minutes."
+    },
+    {
+      "day": 24,
+      "tick": 279,
+      "severity": "info",
+      "title": "Light mode changed to Balanced.",
+      "detail": "System automation"
+    },
+    {
+      "day": 24,
+      "tick": 271,
+      "severity": "info",
+      "title": "CO2 enrichment active.",
+      "detail": "Target index restored."
+    },
+    {
+      "day": 24,
+      "tick": 268,
+      "severity": "info",
+      "title": "Filter maintenance due in 3 days.",
+      "detail": "Utility system notice."
+    }
+  ]
+}
