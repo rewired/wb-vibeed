@@ -29,7 +29,7 @@ Use these documents as the source of truth:
 docs/10_ui/operations-cockpit-widget-taxonomy-v1.md
 docs/10_ui/operations-cockpit-layout-content-v1.md
 docs/10_ui/operations-cockpit-screen-contract-v0.1.md
-docs/prompts/operations-cockpit-mockup-prompt-v1.md
+prompts/image/operations-cockpit.prompt.md
 ```
 
 The screen contract overrides the mockup prompt if there is any conflict.

@@ -31,16 +31,16 @@ The goal is to turn the existing screen contract and mock state into a readable,
 Use these files as authoritative inputs:
 
 ```text
-docs/ui/operations-cockpit-widget-taxonomy-v1.md
-docs/ui/operations-cockpit-layout-content-v1.md
-docs/ui/operations-cockpit-screen-contract-v0.1.md
-docs/data/operations-cockpit-mock-state-v0.1.md
+docs/10_ui/operations-cockpit-widget-taxonomy-v1.md
+docs/10_ui/operations-cockpit-layout-content-v1.md
+docs/10_ui/screen-contracts/operations-cockpit-screen-contract-v0.1.md
+docs/80_data/operations-cockpit-mock-state-v0.1.md
 ```
 
 Optional visual reference / prompt context:
 
 ```text
-docs/prompts/operations-cockpit-mockup-prompt-v1.md
+prompts/image/operations-cockpit.prompt.md
 ```
 
 Do not contradict these documents.
@@ -140,7 +140,7 @@ src/mock/operationsCockpitState.ts
 The mock state must follow the shape defined in:
 
 ```text
-docs/data/operations-cockpit-mock-state-v0.1.md
+docs/80_data/operations-cockpit-mock-state-v0.1.md
 ```
 
 The screen must render from this mock state instead of hardcoding values inside individual components.
