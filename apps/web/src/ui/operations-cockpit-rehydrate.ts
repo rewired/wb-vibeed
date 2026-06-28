@@ -30,6 +30,23 @@ export function rehydrateOperationsCockpit(
       ticksPerDay: blueprint.simulation.ticksPerDay,
       initialTick: blueprint.simulation.initialTick,
     },
+    baseline: {
+      telemetry: {
+        airTemperature: telemetry.airTemperature.value,
+        relativeHumidity: telemetry.relativeHumidity.value,
+        co2Index: telemetry.co2Index.value,
+        lightOutput: telemetry.lightOutput.value,
+        irrigationIndex: telemetry.irrigationIndex.value,
+        airflow: telemetry.airflow.value,
+        nutrientReservoir: telemetry.nutrientReservoir.value,
+      },
+      energy: {
+        powerNow: blueprint.energy.powerNow,
+      },
+      batch: {
+        cycleLengthDays: blueprint.batch.cycleLengthDays,
+      },
+    },
     cockpit: {
       header: {
         title: 'Operations Cockpit',

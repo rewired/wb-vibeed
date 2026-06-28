@@ -27,6 +27,23 @@ export interface SimulationRuntimeState {
   initialTick: number;
 }
 
+export type OperationsCockpitControlSystem = 'light' | 'climate' | 'irrigation';
+
+export type OperationsCockpitRuntimeAction =
+  | { type: 'tick' }
+  | { type: 'set-running'; isRunning: boolean }
+  | { type: 'set-speed'; speed: SimSpeed }
+  | {
+      type: 'set-control-mode';
+      system: OperationsCockpitControlSystem;
+      mode: OperatingMode;
+    }
+  | {
+      type: 'set-control-state';
+      system: OperationsCockpitControlSystem;
+      control: ControlState;
+    };
+
 export interface CockpitControlState {
   light: {
     mode: OperatingMode;
@@ -151,6 +168,25 @@ export interface OperationsCockpitState {
 export interface OperationsCockpitRuntimeState {
   simulation: SimulationRuntimeState;
   cockpit: OperationsCockpitState;
+  baseline: OperationsCockpitRuntimeBaseline;
+}
+
+export interface OperationsCockpitRuntimeBaseline {
+  telemetry: {
+    airTemperature: number;
+    relativeHumidity: number;
+    co2Index: number;
+    lightOutput: number;
+    irrigationIndex: number;
+    airflow: number;
+    nutrientReservoir: number;
+  };
+  energy: {
+    powerNow: number;
+  };
+  batch: {
+    cycleLengthDays: number;
+  };
 }
 
 export interface OperationsCockpitBlueprint {

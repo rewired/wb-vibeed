@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useState, type CSSProperties, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import blueprintData from './operations-cockpit-blueprint.json';
 import { rehydrateOperationsCockpit } from './operations-cockpit-rehydrate';
+import { advanceOperationsCockpitRuntime } from './operations-cockpit-runtime';
 import type {
   ControlTileState,
   EventLogEntryState,
   HeaderStat,
   MetricTileState,
   OperatingMode,
+  OperationsCockpitControlSystem,
   OperationsCockpitBlueprint,
+  OperationsCockpitRuntimeAction,
   OperationsCockpitState,
   ProgressTileState,
   SimSpeed,
@@ -18,13 +21,10 @@ import type {
 } from './operations-cockpit-state-types';
 
 const initialRuntimeState = rehydrateOperationsCockpit(blueprintData as OperationsCockpitBlueprint);
-const cockpitState = initialRuntimeState.cockpit;
 const modeOptions = ['Eco', 'Balanced', 'Push'] as const;
 const controlOptions = ['Auto', 'Manual'] as const;
 const speedOptions = [1, 2, 4, 8] as const satisfies readonly SimSpeed[];
 const BASE_TICK_MS = 1000;
-const MAX_EVENT_LOG_ENTRIES = 20;
-const COST_PER_KWH = 0.34;
 
 function Icon({
   name,
@@ -50,63 +50,50 @@ function Icon({
   );
 }
 
+function controlSystemFromId(controlId: string): OperationsCockpitControlSystem | undefined {
+  const systems: Record<string, OperationsCockpitControlSystem> = {
+    'light-control': 'light',
+    'climate-control': 'climate',
+    'irrigation-control': 'irrigation',
+  };
+
+  return systems[controlId];
+}
+
 export function App() {
-  const [runtimeState, setRuntimeState] = useState<SimulationRuntimeState>(() => initialRuntimeState.simulation);
-  const [controlState, setControlState] = useState<ControlTileState[]>(() => cockpitState.controls);
-  const [localEventLog, setLocalEventLog] = useState<EventLogEntryState[]>([]);
+  const [runtime, setRuntime] = useState(() => initialRuntimeState);
+  const runtimeState = runtime.simulation;
+  const displayState = runtime.cockpit;
 
   useEffect(() => {
     if (!runtimeState.isRunning) return undefined;
 
     const interval = window.setInterval(() => {
-      setRuntimeState((current) => ({ ...current, tick: current.tick + 1 }));
+      setRuntime((current) => advanceOperationsCockpitRuntime(current, { type: 'tick' }));
     }, BASE_TICK_MS / runtimeState.speed);
 
     return () => window.clearInterval(interval);
   }, [runtimeState.isRunning, runtimeState.speed]);
 
-  const displayState = useMemo(
-    () => deriveCockpitState(cockpitState, runtimeState, controlState, localEventLog),
-    [controlState, localEventLog, runtimeState],
-  );
-
-  function addControlEvent(systemLabel: string, target: 'mode' | 'control', value: string) {
-    const day = dayFromTick(runtimeState.tick, runtimeState.ticksPerDay);
-    const title = `${systemLabel} ${target} changed to ${value}.`;
-    const entry: EventLogEntryState = {
-      id: `local-${runtimeState.tick}-${slug(systemLabel)}-${target}-${slug(value)}-${localEventLog.length}`,
-      time: clockFromTick(runtimeState.tick, runtimeState.ticksPerDay),
-      day,
-      tick: runtimeState.tick,
-      severity: 'info',
-      title,
-      detail: 'Operator panel action.',
-    };
-
-    setLocalEventLog((entries) => [entry, ...entries].slice(0, MAX_EVENT_LOG_ENTRIES));
+  function dispatch(action: OperationsCockpitRuntimeAction) {
+    setRuntime((current) => advanceOperationsCockpitRuntime(current, action));
   }
 
   function handleControlModeChange(controlId: string, mode: OperatingMode) {
-    const control = controlState.find((item) => item.id === controlId);
-    if (!control || control.activeMode === mode) return;
-
-    setControlState((items) => items.map((item) => (item.id === controlId ? { ...item, activeMode: mode } : item)));
-    addControlEvent(control.label, 'mode', titleCase(mode));
+    const system = controlSystemFromId(controlId);
+    if (!system) return;
+    dispatch({ type: 'set-control-mode', system, mode });
   }
 
   function handleControlStateChange(controlId: string, controlValue: ControlState) {
-    const control = controlState.find((item) => item.id === controlId);
-    if (!control || control.activeControl === controlValue) return;
-
-    setControlState((items) => (
-      items.map((item) => (item.id === controlId ? { ...item, activeControl: controlValue } : item))
-    ));
-    addControlEvent(control.label, 'control', titleCase(controlValue));
+    const system = controlSystemFromId(controlId);
+    if (!system) return;
+    dispatch({ type: 'set-control-state', system, control: controlValue });
   }
 
   return (
     <main className="cockpit-shell" aria-label="Operations Cockpit static prototype">
-      <Header state={displayState} runtimeState={runtimeState} setRuntimeState={setRuntimeState} />
+      <Header state={displayState} runtimeState={runtimeState} dispatch={dispatch} />
 
       <div className="cockpit-layout">
         <NavigationRail />
@@ -133,11 +120,11 @@ export function App() {
 function Header({
   state,
   runtimeState,
-  setRuntimeState,
+  dispatch,
 }: {
   state: OperationsCockpitState;
   runtimeState: SimulationRuntimeState;
-  setRuntimeState: Dispatch<SetStateAction<SimulationRuntimeState>>;
+  dispatch: (action: OperationsCockpitRuntimeAction) => void;
 }) {
   return (
     <header className="cockpit-header">
@@ -150,17 +137,17 @@ function Header({
           <HeaderStatTile key={stat.label} stat={stat} />
         ))}
       </div>
-      <TransportControls runtimeState={runtimeState} setRuntimeState={setRuntimeState} />
+      <TransportControls runtimeState={runtimeState} dispatch={dispatch} />
     </header>
   );
 }
 
 function TransportControls({
   runtimeState,
-  setRuntimeState,
+  dispatch,
 }: {
   runtimeState: SimulationRuntimeState;
-  setRuntimeState: Dispatch<SetStateAction<SimulationRuntimeState>>;
+  dispatch: (action: OperationsCockpitRuntimeAction) => void;
 }) {
   const speedIndex = speedOptions.indexOf(runtimeState.speed);
 
@@ -170,7 +157,7 @@ function TransportControls({
         className={runtimeState.isRunning ? 'transport-toggle running' : 'transport-toggle'}
         type="button"
         aria-pressed={runtimeState.isRunning}
-        onClick={() => setRuntimeState((current) => ({ ...current, isRunning: !current.isRunning }))}
+        onClick={() => dispatch({ type: 'set-running', isRunning: !runtimeState.isRunning })}
       >
         <Icon name={runtimeState.isRunning ? 'pause' : 'play_arrow'} size="sm" filled />
         <span>{runtimeState.isRunning ? 'PAUSE' : 'RUN'}</span>
@@ -186,7 +173,7 @@ function TransportControls({
           aria-valuetext={formatSpeed(runtimeState.speed)}
           onChange={(event) => {
             const nextSpeed = speedOptions[Number(event.currentTarget.value)] ?? runtimeState.speed;
-            setRuntimeState((current) => ({ ...current, speed: nextSpeed }));
+            dispatch({ type: 'set-speed', speed: nextSpeed });
           }}
         />
         <strong>{formatSpeed(runtimeState.speed)}</strong>
@@ -682,203 +669,8 @@ function ProgressBar({ value }: { value: number }) {
   );
 }
 
-function deriveCockpitState(
-  state: OperationsCockpitState,
-  runtimeState: SimulationRuntimeState,
-  controls: ControlTileState[],
-  localEventLog: EventLogEntryState[],
-): OperationsCockpitState {
-  const day = dayFromTick(runtimeState.tick, runtimeState.ticksPerDay);
-  const metrics = deriveTelemetry(state.environmentalTelemetry, runtimeState.tick, controls);
-  const powerNow = derivePowerNow(state.energyCost, runtimeState.tick, controls);
-  const dailyEnergy = round(powerNow * 24, 1);
-  const dailyCost = round(dailyEnergy * COST_PER_KWH, 2);
-  const eventLog = [...localEventLog, ...state.eventLog].slice(0, MAX_EVENT_LOG_ENTRIES);
-
-  return {
-    ...state,
-    header: {
-      ...state.header,
-      stats: deriveHeaderStats(state.header.stats, runtimeState, day, powerNow, dailyCost),
-    },
-    batchStatus: state.batchStatus.map((item) => (
-      item.id === 'cycle-progress'
-        ? { ...item, secondary: `Day ${day} of ${cycleLengthFromSecondary(item.secondary)}` }
-        : item
-    )),
-    environmentalTelemetry: metrics,
-    controls: deriveControls(controls, metrics),
-    telemetryTrends: deriveTrends(state.telemetryTrends, metrics, powerNow),
-    eventLog,
-    energyCost: deriveEnergyCost(state.energyCost, powerNow, dailyEnergy, dailyCost),
-  };
-}
-
-function deriveHeaderStats(
-  stats: HeaderStat[],
-  runtimeState: SimulationRuntimeState,
-  day: number,
-  powerNow: number,
-  dailyCost: number,
-) {
-  const hasSpeed = stats.some((stat) => stat.label === 'Speed');
-  const runtimeStats = hasSpeed
-    ? stats
-    : stats.flatMap((stat) => (stat.label === 'Tick' ? [stat, { label: 'Speed', value: formatSpeed(runtimeState.speed) }] : [stat]));
-
-  return runtimeStats.map((stat) => {
-    if (stat.label === 'Day') return { ...stat, value: day };
-    if (stat.label === 'Tick') return { ...stat, value: runtimeState.tick };
-    if (stat.label === 'Speed') return { ...stat, value: formatSpeed(runtimeState.speed) };
-    if (stat.label === 'Power Now') return { ...stat, value: powerNow };
-    if (stat.label === 'Daily Cost') return { ...stat, value: dailyCost };
-    return stat;
-  });
-}
-
-function deriveTelemetry(items: MetricTileState[], tick: number, controls: ControlTileState[]) {
-  const light = controlByLabel(controls, 'Light');
-  const climate = controlByLabel(controls, 'Climate');
-  const irrigation = controlByLabel(controls, 'Irrigation');
-  const elapsedTick = tick - initialRuntimeState.simulation.initialTick;
-  const lightOutput = round(clamp(numericMetric(items, 'Light Output', 72) + modeBias(light?.activeMode, 6) + wave(elapsedTick, 1.2, 18), 55, 88));
-  const irrigationIndex = round(clamp(numericMetric(items, 'Irrigation Index', 46) + modeBias(irrigation?.activeMode, 5) + wave(elapsedTick, 1.5, 22), 34, 62));
-  const airflow = round(clamp(numericMetric(items, 'Airflow', 68) + modeBias(climate?.activeMode, 4) + wave(elapsedTick, 1.4, 19), 54, 82));
-  const airTemperature = round(clamp(numericMetric(items, 'Air Temperature', 24.6) + modeBias(climate?.activeMode, 0.3) + wave(elapsedTick, 0.4, 16), 23.4, 25.8), 1);
-  const relativeHumidity = round(clamp(numericMetric(items, 'Relative Humidity', 58) - modeBias(climate?.activeMode, 1.4) + wave(elapsedTick, 2, 20), 50, 64));
-  const co2Index = round(clamp(numericMetric(items, 'CO2 Index', 1150) + wave(elapsedTick, 24, 17), 1080, 1220));
-  const reservoirBase = numericMetric(items, 'Nutrient Reservoir', 79);
-  const reservoir = round(
-    clamp(reservoirBase - (elapsedTick % initialRuntimeState.simulation.ticksPerDay) * 0.15, 76, 82),
-  );
-
-  const values: Record<string, number> = {
-    'air-temperature': airTemperature,
-    'relative-humidity': relativeHumidity,
-    'co2-index': co2Index,
-    'light-output': lightOutput,
-    'irrigation-index': irrigationIndex,
-    airflow,
-    'nutrient-reservoir': reservoir,
-  };
-
-  return items.map((item) => {
-    const value = values[item.id];
-    return typeof value === 'number' ? { ...item, value } : item;
-  });
-}
-
-function deriveControls(controls: ControlTileState[], metrics: MetricTileState[]) {
-  const lightOutput = metricByLabel(metrics, 'Light Output')?.value ?? 72;
-  const irrigationIndex = metricByLabel(metrics, 'Irrigation Index')?.value ?? 46;
-
-  return controls.map((control) => {
-    if (control.label === 'Light') {
-      return {
-        ...control,
-        primaryTuning: { ...control.primaryTuning, value: lightOutput },
-      };
-    }
-
-    if (control.label === 'Climate') {
-      return {
-        ...control,
-        primaryTuning: { ...control.primaryTuning, value: titleCase(control.activeMode) },
-      };
-    }
-
-    if (control.label === 'Irrigation') {
-      return {
-        ...control,
-        primaryTuning: { ...control.primaryTuning, value: irrigationIndex },
-      };
-    }
-
-    return control;
-  });
-}
-
-function derivePowerNow(items: MetricTileState[], tick: number, controls: ControlTileState[]) {
-  const basePower = numericMetric(items, 'Power Now', 18.6);
-  const elapsedTick = tick - initialRuntimeState.simulation.initialTick;
-  const modeLoad = controls.reduce((total, control) => total + modeBias(control.activeMode, 0.55), 0);
-  const manualLoad = controls.reduce((total, control) => total + (control.activeControl === 'Manual' ? 0.12 : 0), 0);
-
-  return round(clamp(basePower + modeLoad + manualLoad + wave(elapsedTick, 0.35, 15), 14, 23), 1);
-}
-
-function deriveEnergyCost(items: MetricTileState[], powerNow: number, dailyEnergy: number, dailyCost: number) {
-  return items.map((item) => {
-    if (item.id === 'power-now') return { ...item, value: powerNow };
-    if (item.id === 'daily-energy') return { ...item, value: dailyEnergy };
-    if (item.id === 'daily-cost') return { ...item, value: dailyCost };
-    if (item.id === 'weekly-cost') return { ...item, value: round(dailyCost * 7, 2) };
-    return item;
-  });
-}
-
-function deriveTrends(items: TrendTileState[], metrics: MetricTileState[], powerNow: number) {
-  const metricValues: Record<string, number> = {
-    'air-temperature-trend': numericMetric(metrics, 'Air Temperature', 24.6),
-    'relative-humidity-trend': numericMetric(metrics, 'Relative Humidity', 58),
-    'irrigation-moisture-trend': numericMetric(metrics, 'Irrigation Index', 46),
-    'power-draw-trend': powerNow,
-  };
-
-  return items.map((item) => {
-    const currentValue = metricValues[item.id];
-    if (typeof currentValue !== 'number') return item;
-
-    return {
-      ...item,
-      currentValue,
-      points: [...item.points.slice(1), currentValue],
-    };
-  });
-}
-
-function wave(tick: number, amplitude: number, period: number) {
-  return Math.sin(tick / period) * amplitude;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
-}
-
-function round(value: number, digits = 0) {
-  const factor = 10 ** digits;
-  return Math.round(value * factor) / factor;
-}
-
-function modeBias(mode: OperatingMode | undefined, amount: number) {
-  if (mode === 'Eco') return -amount;
-  if (mode === 'Push') return amount;
-  return 0;
-}
-
-function dayFromTick(tick: number, ticksPerDay: number) {
-  return Math.floor(tick / ticksPerDay) + 1;
-}
-
-function clockFromTick(tick: number, ticksPerDay: number) {
-  const minutesPerTick = Math.floor((24 * 60) / ticksPerDay);
-  const minutes = (tick % ticksPerDay) * minutesPerTick;
-  const hours = Math.floor(minutes / 60);
-  const minute = minutes % 60;
-  return `${padTime(hours)}:${padTime(minute)}:00`;
-}
-
-function padTime(value: number) {
-  return String(value).padStart(2, '0');
-}
-
 function formatSpeed(speed: SimSpeed) {
   return `${speed}x`;
-}
-
-function numericMetric(items: MetricTileState[], label: string, fallback: number) {
-  const value = items.find((item) => item.label === label)?.value;
-  return typeof value === 'number' ? value : fallback;
 }
 
 function formatValue(value: string | number, unit?: string) {
@@ -919,11 +711,6 @@ function metricByLabel(items: MetricTileState[], label: string) {
 function controlMode(item?: ControlTileState) {
   if (!item) return 'Auto';
   return `${titleCase(item.activeMode)} / ${titleCase(item.activeControl)}`;
-}
-
-function cycleLengthFromSecondary(value: string | undefined) {
-  const match = value?.match(/of (\d+)/);
-  return match?.[1] ?? '39';
 }
 
 function compactBatchLabel(label: string) {
