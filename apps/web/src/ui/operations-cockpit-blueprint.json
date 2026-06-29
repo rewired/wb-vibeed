@@ -20,7 +20,7 @@
     "id": "B-017",
     "roomId": "R-01",
     "zoneId": "Z-01",
-    "phase": "Mid Cycle",
+    "phase": "Production",
     "cycleLengthDays": 39,
     "status": "normal"
   },
@@ -173,7 +173,7 @@
       "day": 24,
       "tick": 271,
       "severity": "info",
-      "title": "CO2 enrichment active.",
+      "title": "CO2 index stable.",
       "detail": "Target index restored."
     },
     {

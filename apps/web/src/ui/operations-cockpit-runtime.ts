@@ -4,14 +4,20 @@ import type {
   EventLogEntryState,
   MetricTileState,
   OperatingMode,
+  OperationalPhase,
   OperationsCockpitControlSystem,
   OperationsCockpitRuntimeAction,
   OperationsCockpitRuntimeState,
+  RuntimeWarningKey,
+  StatusLevel,
   TrendTileState,
+  UtilityStatusItemState,
+  WarningConditionState,
 } from './operations-cockpit-state-types';
 
 const MAX_EVENT_LOG_ENTRIES = 20;
 const COST_PER_KWH = 0.34;
+const NUTRIENT_REVIEW_THRESHOLD = 45;
 
 export function advanceOperationsCockpitRuntime(
   state: OperationsCockpitRuntimeState,
@@ -20,7 +26,7 @@ export function advanceOperationsCockpitRuntime(
   if (action.type === 'tick') {
     if (!state.simulation.isRunning) return state;
 
-    return deriveRuntimeState({
+    return deriveOperationsCockpitRuntime({
       ...state,
       simulation: {
         ...state.simulation,
@@ -44,7 +50,7 @@ export function advanceOperationsCockpitRuntime(
   if (action.type === 'set-speed') {
     if (state.simulation.speed === action.speed) return state;
 
-    return deriveRuntimeState({
+    return deriveOperationsCockpitRuntime({
       ...state,
       simulation: {
         ...state.simulation,
@@ -58,6 +64,10 @@ export function advanceOperationsCockpitRuntime(
   }
 
   return applyControlChange(state, action.system, 'control', action.control);
+}
+
+export function initializeOperationsCockpitRuntime(state: OperationsCockpitRuntimeState): OperationsCockpitRuntimeState {
+  return deriveOperationsCockpitRuntime(state, { emitWarningEvents: false });
 }
 
 function applyControlChange(
@@ -82,7 +92,7 @@ function applyControlChange(
 
   const event = controlChangeEvent(state, control.label, target, value);
 
-  return deriveRuntimeState({
+  return deriveOperationsCockpitRuntime({
     ...state,
     cockpit: {
       ...state.cockpit,
@@ -92,16 +102,33 @@ function applyControlChange(
   });
 }
 
-function deriveRuntimeState(state: OperationsCockpitRuntimeState): OperationsCockpitRuntimeState {
+function deriveOperationsCockpitRuntime(
+  state: OperationsCockpitRuntimeState,
+  options: { emitWarningEvents?: boolean } = {},
+): OperationsCockpitRuntimeState {
   const day = dayFromTick(state.simulation.tick, state.simulation.ticksPerDay);
-  const metrics = deriveTelemetry(state);
-  const powerNow = derivePowerNow(state);
+  const cycleProgress = cycleProgressFromDay(day, state.baseline.batch.cycleLengthDays);
+  const phase = phaseFromCycleProgress(cycleProgress);
+  const readyForReview = cycleProgress >= 100;
+  const controls = deriveControls(state.cockpit.controls);
+  const metrics = deriveTelemetry({ ...state, cockpit: { ...state.cockpit, controls } });
+  const warnings = deriveWarnings(state, metrics, cycleProgress, readyForReview);
+  const warningKeys = warnings.map((warning) => warning.key);
+  const roomStatus = deriveRoomStatus(state.cockpit.roomOverview.status, warnings);
+  const powerNow = derivePowerNow({ ...state, cockpit: { ...state.cockpit, controls } });
   const dailyEnergy = round(powerNow * 24, 1);
   const dailyCost = round(dailyEnergy * COST_PER_KWH, 2);
-  const cycleProgress = cycleProgressFromDay(day, state.baseline.batch.cycleLengthDays);
+  const utilityStatus = deriveUtilityStatus(state.cockpit.utilityStatus, warnings);
+  const warningEvents = options.emitWarningEvents === false
+    ? []
+    : warnings
+        .filter((warning) => !state.activeWarnings.includes(warning.key))
+        .map((warning) => warningEvent(state, warning));
+  const eventLog = [...warningEvents, ...state.cockpit.eventLog].slice(0, MAX_EVENT_LOG_ENTRIES);
 
   return {
     ...state,
+    activeWarnings: warningKeys,
     cockpit: {
       ...state.cockpit,
       header: {
@@ -109,45 +136,138 @@ function deriveRuntimeState(state: OperationsCockpitRuntimeState): OperationsCoc
         stats: state.cockpit.header.stats.map((stat) => {
           if (stat.label === 'Day') return { ...stat, value: day };
           if (stat.label === 'Tick') return { ...stat, value: state.simulation.tick };
+          if (stat.label === 'Overall Status') return { ...stat, value: titleCase(roomStatus), status: roomStatus };
           if (stat.label === 'Facility Load') return { ...stat, value: powerNow };
           if (stat.label === 'Cost Today') return { ...stat, value: dailyCost };
+          if (stat.label === 'Utility') return { ...stat, value: utilitySummary(utilityStatus), status: statusFromUtility(utilityStatus) };
           return stat;
         }),
       },
-      batchStatus: state.cockpit.batchStatus.map((item) => (
-        item.id === 'cycle-progress'
-          ? { ...item, value: cycleProgress, secondary: `Day ${day} of ${state.baseline.batch.cycleLengthDays}` }
-          : item
-      )),
+      roomOverview: {
+        ...state.cockpit.roomOverview,
+        phase,
+        status: roomStatus,
+      },
+      batchRuntime: {
+        currentDay: day,
+        cycleLengthDays: state.baseline.batch.cycleLengthDays,
+        cycleProgress,
+        phase,
+        readyForReview,
+      },
+      batchStatus: state.cockpit.batchStatus.map((item) => {
+        if (item.id !== 'cycle-progress') return item;
+
+        return {
+          ...item,
+          value: cycleProgress,
+          secondary: readyForReview
+            ? `Day ${day} of ${state.baseline.batch.cycleLengthDays} / Ready for review`
+            : `Day ${day} of ${state.baseline.batch.cycleLengthDays}`,
+          status: readyForReview ? 'warning' : roomStatus,
+        };
+      }),
       environmentalTelemetry: metrics,
-      controls: deriveControls(state.cockpit.controls),
+      controls,
       telemetryTrends: deriveTrends(state.cockpit.telemetryTrends, metrics),
       energyCost: deriveEnergyCost(state.cockpit.energyCost, powerNow, dailyEnergy, dailyCost),
+      utilityStatus,
+      eventLog,
+      warningConditions: warnings,
     },
   };
 }
 
-function deriveTelemetry(state: OperationsCockpitRuntimeState) {
-  const tick = state.simulation.tick - state.simulation.initialTick;
+function deriveTelemetry(state: OperationsCockpitRuntimeState): MetricTileState[] {
+  const tick = elapsedTick(state);
   const light = controlByLabel(state.cockpit.controls, 'Light');
   const climate = controlByLabel(state.cockpit.controls, 'Climate');
   const irrigation = controlByLabel(state.cockpit.controls, 'Irrigation');
   const baseline = state.baseline.telemetry;
 
   const values: Record<string, number> = {
-    'air-temperature': round(clamp(baseline.airTemperature + modeBias(climate?.activeMode, 0.3) + wave(tick, 0.4, 16), 23.4, 25.8), 1),
-    'relative-humidity': round(clamp(baseline.relativeHumidity - modeBias(climate?.activeMode, 1.4) + wave(tick, 2, 20), 50, 64)),
-    'co2-index': round(clamp(baseline.co2Index + wave(tick, 24, 17), 1080, 1220)),
+    'air-temperature': round(clamp(baseline.airTemperature + modeBias(light?.activeMode, 0.25) + wave(tick, 0.4, 16), 23.4, 25.8), 1),
+    'relative-humidity': round(clamp(baseline.relativeHumidity + modeBias(irrigation?.activeMode, 1.2) + wave(tick, 1.8, 20, 4), 50, 64)),
+    'co2-index': round(clamp(baseline.co2Index + wave(tick, 24, 17, 8), 1080, 1220)),
     'light-output': round(clamp(baseline.lightOutput + modeBias(light?.activeMode, 6) + wave(tick, 1.2, 18), 55, 88)),
-    'irrigation-index': round(clamp(baseline.irrigationIndex + modeBias(irrigation?.activeMode, 5) + wave(tick, 1.5, 22), 34, 62)),
-    airflow: round(clamp(baseline.airflow + modeBias(climate?.activeMode, 4) + wave(tick, 1.4, 19), 54, 82)),
-    'nutrient-reservoir': round(clamp(baseline.nutrientReservoir - (tick % state.simulation.ticksPerDay) * 0.15, 76, 82)),
+    'irrigation-index': round(clamp(baseline.irrigationIndex + modeBias(irrigation?.activeMode, 5) + wave(tick, 1.5, 22, 6), 34, 62)),
+    airflow: round(clamp(baseline.airflow + modeBias(climate?.activeMode, 4) + wave(tick, 1.4, 19, 2), 54, 82)),
+    'nutrient-reservoir': round(clamp(baseline.nutrientReservoir - tick * 0.22 + wave(tick, 0.35, 28), 0, 100)),
   };
 
   return state.cockpit.environmentalTelemetry.map((item) => {
     const value = values[item.id];
-    return typeof value === 'number' ? { ...item, value } : item;
+    if (typeof value !== 'number') return item;
+    const status: StatusLevel = item.id === 'nutrient-reservoir' && value <= NUTRIENT_REVIEW_THRESHOLD ? 'warning' : 'normal';
+    const nextItem = {
+      ...item,
+      value,
+      status,
+    };
+
+    return item.id === 'nutrient-reservoir'
+      ? { ...nextItem, reference: `Review Threshold ${NUTRIENT_REVIEW_THRESHOLD} %` }
+      : nextItem;
   });
+}
+
+function deriveWarnings(
+  state: OperationsCockpitRuntimeState,
+  metrics: MetricTileState[],
+  cycleProgress: number,
+  readyForReview: boolean,
+): WarningConditionState[] {
+  const day = dayFromTick(state.simulation.tick, state.simulation.ticksPerDay);
+  const cycleLengthDays = state.baseline.batch.cycleLengthDays;
+  const nutrientReservoir = numericMetric(metrics, 'Nutrient Reservoir', state.baseline.telemetry.nutrientReservoir);
+  const warnings: WarningConditionState[] = [];
+
+  if (day >= Math.max(1, cycleLengthDays - 15)) {
+    warnings.push({
+      key: 'filter-maintenance-due',
+      severity: 'warning',
+      title: 'Filter maintenance due.',
+      detail: 'Exhaust / Filtration requires operational review.',
+      object: 'exhaust',
+    });
+  }
+
+  if (cycleProgress >= 70 && !readyForReview) {
+    warnings.push({
+      key: 'sensor-network-warning',
+      severity: 'warning',
+      title: 'Sensor network warning.',
+      detail: 'Telemetry network requires review.',
+      object: 'sensors',
+    });
+  }
+
+  if (nutrientReservoir <= NUTRIENT_REVIEW_THRESHOLD) {
+    warnings.push({
+      key: 'nutrient-reservoir-low',
+      severity: 'warning',
+      title: 'Nutrient reservoir below threshold.',
+      detail: 'Nutrient system requires review.',
+      object: 'nutrient',
+    });
+  }
+
+  if (readyForReview) {
+    warnings.push({
+      key: 'cycle-ready',
+      severity: 'warning',
+      title: 'Cycle progress reached 100%.',
+      detail: 'Batch is ready for review.',
+      object: 'canopy',
+    });
+  }
+
+  return warnings;
+}
+
+function deriveRoomStatus(currentStatus: StatusLevel, warnings: WarningConditionState[]): StatusLevel {
+  if (currentStatus === 'critical') return 'critical';
+  return warnings.length > 0 ? 'warning' : 'normal';
 }
 
 function deriveControls(controls: ControlTileState[]) {
@@ -178,7 +298,7 @@ function deriveControls(controls: ControlTileState[]) {
 }
 
 function derivePowerNow(state: OperationsCockpitRuntimeState) {
-  const tick = state.simulation.tick - state.simulation.initialTick;
+  const tick = elapsedTick(state);
   const modeLoad = state.cockpit.controls.reduce((total, control) => total + modeBias(control.activeMode, 0.55), 0);
   const manualLoad = state.cockpit.controls.reduce((total, control) => total + (control.activeControl === 'Manual' ? 0.12 : 0), 0);
 
@@ -192,6 +312,21 @@ function deriveEnergyCost(items: MetricTileState[], powerNow: number, dailyEnerg
     if (item.id === 'daily-cost') return { ...item, value: dailyCost };
     if (item.id === 'weekly-cost') return { ...item, value: round(dailyCost * 7, 2) };
     return item;
+  });
+}
+
+function deriveUtilityStatus(items: UtilityStatusItemState[], warnings: WarningConditionState[]): UtilityStatusItemState[] {
+  const hasSensorWarning = warnings.some((warning) => warning.key === 'sensor-network-warning');
+
+  return items.map((item) => {
+    if (item.id !== 'network') return item;
+
+    if (hasSensorWarning) {
+      return { ...item, value: 'Review', secondary: 'Sensor network warning', status: 'warning' };
+    }
+
+    const { secondary: _secondary, ...networkStatus } = item;
+    return { ...networkStatus, value: 'Connected', status: 'normal' };
   });
 }
 
@@ -235,6 +370,20 @@ function controlChangeEvent(
     severity: 'info',
     title,
     detail: 'Operator panel action.',
+  };
+}
+
+function warningEvent(state: OperationsCockpitRuntimeState, warning: WarningConditionState): EventLogEntryState {
+  const day = dayFromTick(state.simulation.tick, state.simulation.ticksPerDay);
+
+  return {
+    id: `warning-${state.simulation.tick}-${warning.key}`,
+    time: clockFromTick(state.simulation.tick, state.simulation.ticksPerDay),
+    day,
+    tick: state.simulation.tick,
+    severity: warning.severity,
+    title: warning.title,
+    detail: warning.detail,
   };
 }
 
@@ -284,6 +433,18 @@ function cycleProgressFromDay(day: number, cycleLengthDays: number) {
   return clamp(Math.round((day / cycleLengthDays) * 100), 0, 100);
 }
 
+function phaseFromCycleProgress(progress: number): OperationalPhase {
+  if (progress < 15) return 'Startup';
+  if (progress < 45) return 'Build';
+  if (progress < 85) return 'Production';
+  if (progress < 100) return 'Late Cycle';
+  return 'Ready';
+}
+
+function elapsedTick(state: OperationsCockpitRuntimeState) {
+  return Math.max(0, state.simulation.tick - state.simulation.initialTick);
+}
+
 function clockFromTick(tick: number, ticksPerDay: number) {
   const minutesPerTick = Math.floor((24 * 60) / ticksPerDay);
   const minutes = (tick % ticksPerDay) * minutesPerTick;
@@ -304,4 +465,19 @@ function targetFromMode(mode: OperatingMode) {
   if (mode === 'Eco') return 'Eco';
   if (mode === 'Push') return 'Push';
   return 'Nominal';
+}
+
+function titleCase(value: string) {
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+}
+
+function utilitySummary(items: UtilityStatusItemState[]) {
+  const warning = items.find((item) => item.status !== 'normal');
+  return warning ? titleCase(warning.status) : 'Normal';
+}
+
+function statusFromUtility(items: UtilityStatusItemState[]): StatusLevel {
+  if (items.some((item) => item.status === 'critical')) return 'critical';
+  if (items.some((item) => item.status === 'warning')) return 'warning';
+  return 'normal';
 }

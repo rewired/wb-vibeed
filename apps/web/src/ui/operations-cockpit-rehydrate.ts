@@ -8,6 +8,7 @@ import type {
   TelemetryKey,
   TrendTileState,
 } from './operations-cockpit-state-types';
+import { initializeOperationsCockpitRuntime } from './operations-cockpit-runtime';
 
 export function rehydrateOperationsCockpit(
   blueprint: OperationsCockpitBlueprint,
@@ -21,7 +22,7 @@ export function rehydrateOperationsCockpit(
   const statusLabel = titleCase(blueprint.room.status);
   const telemetry = blueprint.telemetryBase;
 
-  return {
+  return initializeOperationsCockpitRuntime({
     simulation: {
       isRunning: blueprint.simulation.initialRunning,
       tick: blueprint.simulation.initialTick,
@@ -68,6 +69,13 @@ export function rehydrateOperationsCockpit(
         activeView: '3d',
         overlays: ['Supply Air', 'Return Air', 'Exhaust', 'Light', 'Irrigation', 'Sensors'],
         capacity: rehydrateCapacity(blueprint.capacity),
+      },
+      batchRuntime: {
+        currentDay: day,
+        cycleLengthDays: blueprint.batch.cycleLengthDays,
+        cycleProgress,
+        phase: 'Production',
+        readyForReview: cycleProgress >= 100,
       },
       batchStatus: rehydrateBatchStatus(blueprint, day, cycleProgress),
       environmentalTelemetry: [
@@ -117,6 +125,7 @@ export function rehydrateOperationsCockpit(
         time: clockFromTick(entry.tick, blueprint.simulation.ticksPerDay),
         ...entry,
       })),
+      warningConditions: [],
       energyCost: [
         {
           id: 'power-now',
@@ -161,7 +170,8 @@ export function rehydrateOperationsCockpit(
         { id: 'network', label: 'Network', ...blueprint.utilityStatus.network },
       ],
     },
-  };
+    activeWarnings: [],
+  });
 }
 
 function rehydrateCapacity(capacity: OperationsCockpitBlueprint['capacity']): RoomCapacityItemState[] {

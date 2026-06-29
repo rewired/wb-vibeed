@@ -280,6 +280,7 @@ function RoomContext({
             <strong>{cycle.progress}%</strong>
             <small>Day {cycle.currentDay} of {cycle.cycleLengthDays}</small>
             <small>Phase: {cycle.phase}</small>
+            {cycle.readyForReview ? <small>Ready for review</small> : null}
           </div>
           <ProgressBar value={cycle.progress} />
         </article>
@@ -502,15 +503,16 @@ function ControlledSystemInspector({
 
 function NutrientInspector({ state }: { state: OperationsCockpitState }) {
   const reservoir = metricById(state.environmentalTelemetry, 'nutrient-reservoir');
+  const status = objectRuntimeStatus(state, 'nutrient', 'Online');
 
   return (
     <div className="inspector-stack">
       <InspectorFacts
         facts={[
-          ['Status', 'Online'],
+          ['Status', status.label],
           ['Reservoir Connected', 'Yes'],
           ['Nutrient Reservoir %', reservoir ? formatValue(reservoir.value, reservoir.unit) : 'Unavailable'],
-          ['Refill Threshold', reservoir?.reference?.replace('Refill Threshold ', '') ?? '20 %'],
+          ['Review Threshold', reservoir?.reference?.replace('Review Threshold ', '') ?? 'Unavailable'],
         ]}
       />
       <LastEvent event={lastEventForObject(state.eventLog, 'nutrient', 'Reservoir connected')} />
@@ -537,6 +539,7 @@ function CanopyInspector({ state }: { state: OperationsCockpitState }) {
 
 function SensorsInspector({ state }: { state: OperationsCockpitState }) {
   const sensors = capacityById(state.roomOverview.capacity, 'sensor-points');
+  const status = objectRuntimeStatus(state, 'sensors', 'Online');
   const coverageMetricIds: TelemetryKey[] = ['air-temperature', 'relative-humidity', 'co2-index', 'airflow'];
   const coverage = coverageMetricIds
     .map((id) => metricById(state.environmentalTelemetry, id)?.label)
@@ -547,7 +550,7 @@ function SensorsInspector({ state }: { state: OperationsCockpitState }) {
     <div className="inspector-stack">
       <InspectorFacts
         facts={[
-          ['Status', titleCase(state.roomOverview.status)],
+          ['Status', status.label],
           ['Sensor Points Online', `${sensors?.online ?? 0} / ${sensors?.total ?? 0}`],
           ['Telemetry Coverage', coverage],
         ]}
@@ -560,14 +563,15 @@ function SensorsInspector({ state }: { state: OperationsCockpitState }) {
 
 function ExhaustInspector({ state }: { state: OperationsCockpitState }) {
   const exhaust = capacityById(state.roomOverview.capacity, 'exhaust-filters');
+  const status = objectRuntimeStatus(state, 'exhaust', 'Online');
 
   return (
     <div className="inspector-stack">
       <InspectorFacts
         facts={[
           ['Filter Count', `${exhaust?.online ?? 0} / ${exhaust?.total ?? 0}`],
-          ['Status', 'Maintenance Due'],
-          ['Maintenance State', 'Due in 3 days'],
+          ['Status', status.label],
+          ['Maintenance State', status.statusLevel === 'warning' ? 'Due' : 'Current'],
         ]}
       />
       <LastEvent event={lastEventForObject(state.eventLog, 'exhaust', 'No recent filtration event')} />
@@ -852,6 +856,12 @@ function roomAssets(state: OperationsCockpitState) {
   const irrigation = controlByLabel(state.controls, 'Irrigation');
   const canopy = capacityById(state.roomOverview.capacity, 'canopy-tables');
   const sensors = capacityById(state.roomOverview.capacity, 'sensor-points');
+  const canopyStatus = state.batchRuntime.readyForReview
+    ? objectStatus('Ready for Review', 'Ready', 'task_alt', 'warning')
+    : objectStatus('Monitored', 'Watch', 'visibility', 'normal');
+  const nutrientStatus = objectRuntimeStatus(state, 'nutrient', 'Online');
+  const sensorStatus = objectRuntimeStatus(state, 'sensors', 'Online');
+  const exhaustStatus = objectRuntimeStatus(state, 'exhaust', 'Online');
 
   return [
     {
@@ -859,10 +869,10 @@ function roomAssets(state: OperationsCockpitState) {
       icon: 'yard',
       name: 'Canopy / Plants',
       secondary: `${canopy?.active ?? 0} tables active`,
-      status: 'Monitored',
-      statusShort: 'Watch',
-      statusIcon: 'visibility',
-      statusLevel: 'normal',
+      status: canopyStatus.label,
+      statusShort: canopyStatus.shortLabel,
+      statusIcon: canopyStatus.icon,
+      statusLevel: canopyStatus.statusLevel,
     },
     {
       id: 'lighting',
@@ -899,30 +909,30 @@ function roomAssets(state: OperationsCockpitState) {
       icon: 'science',
       name: 'Nutrient System',
       secondary: 'Reservoir Connected',
-      status: 'Online',
-      statusShort: 'Online',
-      statusIcon: 'check_circle',
-      statusLevel: 'normal',
+      status: nutrientStatus.label,
+      statusShort: nutrientStatus.shortLabel,
+      statusIcon: nutrientStatus.icon,
+      statusLevel: nutrientStatus.statusLevel,
     },
     {
       id: 'sensors',
       icon: 'sensors',
       name: 'Sensor Network',
       secondary: `${sensors?.online ?? 0} points online`,
-      status: titleCase(state.roomOverview.status),
-      statusShort: statusShortLabel(state.roomOverview.status),
-      statusIcon: statusIcon(state.roomOverview.status),
-      statusLevel: state.roomOverview.status,
+      status: sensorStatus.label,
+      statusShort: sensorStatus.shortLabel,
+      statusIcon: sensorStatus.icon,
+      statusLevel: sensorStatus.statusLevel,
     },
     {
       id: 'exhaust',
       icon: 'filter_alt',
       name: 'Exhaust / Filtration',
-      secondary: 'Maintenance due',
-      status: 'Maintenance Due',
-      statusShort: 'Due',
-      statusIcon: 'build_circle',
-      statusLevel: 'warning',
+      secondary: exhaustStatus.statusLevel === 'warning' ? 'Maintenance due' : 'Maintenance current',
+      status: exhaustStatus.label,
+      statusShort: exhaustStatus.shortLabel,
+      statusIcon: exhaustStatus.icon,
+      statusLevel: exhaustStatus.statusLevel,
     },
   ] as const satisfies readonly {
     id: SelectedRoomObject;
@@ -970,28 +980,17 @@ function batchContextGroups(state: OperationsCockpitState): { label: string; row
 }
 
 function batchCycleSummary(state: OperationsCockpitState) {
+  const runtime = state.batchRuntime;
   const cycleProgress = state.batchStatus.find((item) => item.id === 'cycle-progress');
-  const dayStat = state.header.stats.find((item) => item.label === 'Day')?.value;
-  const cycleText = cycleProgress?.secondary ?? '';
-  const match = /Day\s+(\d+)\s+of\s+(\d+)/i.exec(cycleText);
-  const currentDay = typeof dayStat === 'number' ? dayStat : Number(match?.[1] ?? 0);
-  const cycleLengthDays = Number(match?.[2] ?? currentDay);
-  const progress = clamp(Math.round((currentDay / Math.max(cycleLengthDays, 1)) * 100), 0, 100);
 
   return {
-    currentDay,
-    cycleLengthDays,
-    phase: state.roomOverview.phase || lifecyclePhaseFromProgress(progress),
-    progress,
+    currentDay: runtime.currentDay,
+    cycleLengthDays: runtime.cycleLengthDays,
+    phase: runtime.phase,
+    progress: runtime.cycleProgress,
+    readyForReview: runtime.readyForReview,
     status: cycleProgress?.status ?? state.roomOverview.status,
   };
-}
-
-function lifecyclePhaseFromProgress(progress: number) {
-  if (progress <= 15) return 'Seedling';
-  if (progress <= 45) return 'Vegetative';
-  if (progress <= 85) return 'Flowering';
-  return 'Late Cycle';
 }
 
 function formatInspectorValue(tuning?: ControlTileState['primaryTuning']) {
@@ -1059,6 +1058,28 @@ function statusShortLabel(status: StatusLevel) {
     critical: 'Critical',
   };
   return labels[status];
+}
+
+function objectRuntimeStatus(state: OperationsCockpitState, object: SelectedRoomObject, normalLabel: string) {
+  const warning = state.warningConditions.find((item) => item.object === object);
+
+  if (!warning) {
+    return objectStatus(normalLabel, statusShortLabel('normal'), statusIcon('normal'), 'normal');
+  }
+
+  if (warning.key === 'filter-maintenance-due') {
+    return objectStatus('Maintenance Due', 'Due', 'build_circle', 'warning');
+  }
+
+  if (warning.key === 'cycle-ready') {
+    return objectStatus('Ready for Review', 'Ready', 'task_alt', 'warning');
+  }
+
+  return objectStatus('Warning', statusShortLabel('warning'), statusIcon('warning'), 'warning');
+}
+
+function objectStatus(label: string, shortLabel: string, icon: string, statusLevel: StatusLevel) {
+  return { label, shortLabel, icon, statusLevel };
 }
 
 function trendIdForMetric(id: TelemetryKey): TrendTileState['id'] {

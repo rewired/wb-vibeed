@@ -18,6 +18,12 @@ export type SeverityLevel = EventSeverity;
 export type OperatingMode = 'Eco' | 'Balanced' | 'Push';
 export type ControlState = 'Auto' | 'Manual';
 export type SimSpeed = 1 | 2 | 4 | 8;
+export type OperationalPhase = 'Startup' | 'Build' | 'Production' | 'Late Cycle' | 'Ready';
+export type RuntimeWarningKey =
+  | 'cycle-ready'
+  | 'filter-maintenance-due'
+  | 'sensor-network-warning'
+  | 'nutrient-reservoir-low';
 export type SelectedRoomObject =
   | 'canopy'
   | 'lighting'
@@ -137,6 +143,22 @@ export interface EventLogEntryState {
   detail?: string;
 }
 
+export interface WarningConditionState {
+  key: RuntimeWarningKey;
+  severity: 'warning';
+  title: string;
+  detail: string;
+  object: SelectedRoomObject;
+}
+
+export interface BatchRuntimeSummaryState {
+  currentDay: number;
+  cycleLengthDays: number;
+  cycleProgress: number;
+  phase: OperationalPhase;
+  readyForReview: boolean;
+}
+
 export interface RoomCapacityItemState {
   id: string;
   label: string;
@@ -179,11 +201,13 @@ export interface OperationsCockpitState {
     capacity: RoomCapacityItemState[];
   };
 
+  batchRuntime: BatchRuntimeSummaryState;
   batchStatus: ProgressTileState[];
   environmentalTelemetry: MetricTileState[];
   controls: ControlTileState[];
   telemetryTrends: TrendTileState[];
   eventLog: EventLogEntryState[];
+  warningConditions: WarningConditionState[];
 
   energyCost: MetricTileState[];
   utilityStatus: UtilityStatusItemState[];
@@ -193,6 +217,7 @@ export interface OperationsCockpitRuntimeState {
   simulation: SimulationRuntimeState;
   cockpit: OperationsCockpitState;
   baseline: OperationsCockpitRuntimeBaseline;
+  activeWarnings: RuntimeWarningKey[];
 }
 
 export interface OperationsCockpitRuntimeBaseline {
