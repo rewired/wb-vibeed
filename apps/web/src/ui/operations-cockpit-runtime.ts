@@ -219,7 +219,7 @@ function deriveOperationsCockpitRuntime(
           secondary: lifecycleState === 'completed'
             ? `Day ${day} of ${state.baseline.batch.cycleLengthDays} / Completed`
             : readyForReview
-            ? `Day ${day} of ${state.baseline.batch.cycleLengthDays} / Ready for review`
+            ? `Day ${day} of ${state.baseline.batch.cycleLengthDays} / Harvest Ready`
             : `Day ${day} of ${state.baseline.batch.cycleLengthDays}`,
           status: readyForReview ? 'warning' : roomStatus,
         };
@@ -319,7 +319,7 @@ function deriveWarnings(
     warnings.push({
       key: 'cycle-ready',
       severity: 'warning',
-      title: 'Batch ready for review.',
+      title: 'Batch harvest-ready.',
       detail: 'Cycle progress reached 100%.',
       object: 'canopy',
     });
@@ -511,11 +511,11 @@ function cycleProgressFromDay(day: number, cycleLengthDays: number) {
 }
 
 function phaseFromCycleProgress(progress: number): OperationalPhase {
-  if (progress < 15) return 'Startup';
-  if (progress < 45) return 'Build';
-  if (progress < 85) return 'Production';
-  if (progress < 100) return 'Late Cycle';
-  return 'Ready';
+  if (progress < 15) return 'Seedling';
+  if (progress < 45) return 'Vegetative';
+  if (progress < 85) return 'Flowering';
+  if (progress < 100) return 'Late Flower';
+  return 'Harvest Ready';
 }
 
 function elapsedTick(state: OperationsCockpitRuntimeState) {

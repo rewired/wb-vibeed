@@ -347,7 +347,7 @@ button {
 
 .room-context-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 230px minmax(0, 1.12fr);
+  grid-template-columns: minmax(0, 1fr) 260px minmax(0, 1.12fr);
   gap: 8px;
   height: calc(100% - 34px);
   padding: 7px;
@@ -370,7 +370,8 @@ button {
 
 .room-context-strip > div,
 .batch-context-facts > div,
-.context-cycle {
+.context-cycle,
+.lifecycle-action-card {
   display: grid;
   align-content: center;
   gap: 4px;
@@ -399,29 +400,55 @@ button {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.context-cycle div {
+.lifecycle-stack {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.lifecycle-active {
+  grid-template-rows: 1fr;
+}
+
+.lifecycle-ready,
+.lifecycle-completed {
+  grid-template-rows: minmax(0, 1fr) 36px;
+}
+
+.cycle-copy {
   display: grid;
   gap: 4px;
 }
 
-.lifecycle-actions {
+.lifecycle-action-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
-  margin-top: 2px;
+  gap: 8px;
+  padding: 0 9px;
 }
 
-.lifecycle-actions b {
+.lifecycle-action-ready {
+  border-color: rgba(217, 155, 43, 0.58);
+  background: rgba(217, 155, 43, 0.12);
+}
+
+.lifecycle-action-completed {
+  border-color: rgba(120, 185, 75, 0.5);
+  background: rgba(120, 185, 75, 0.1);
+}
+
+.lifecycle-action-card b {
   overflow: hidden;
-  color: var(--amber);
+  color: #e0e8e4;
   font-size: 10px;
   text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
 }
 
-.lifecycle-actions button {
+.lifecycle-action-card button {
   display: inline-grid;
   grid-template-columns: 16px auto;
   align-items: center;
@@ -439,6 +466,12 @@ button {
   cursor: pointer;
 }
 
+.lifecycle-action-completed button {
+  border-color: rgba(120, 185, 75, 0.56);
+  color: #d9efd0;
+  background: rgba(120, 185, 75, 0.14);
+}
+
 .context-cycle small {
   color: var(--muted);
   font-size: 10px;
@@ -449,7 +482,7 @@ button {
 .context-cycle strong {
   overflow: hidden;
   color: #e0e8e4;
-  font-size: 15px;
+  font-size: 24px;
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -523,6 +556,7 @@ button {
 .asset-list::-webkit-scrollbar,
 .inspector-shell > .system-inspector-grid::-webkit-scrollbar,
 .inspector-shell > .inspector-stack::-webkit-scrollbar,
+.inspector-shell > .batch-report-view::-webkit-scrollbar,
 .event-list::-webkit-scrollbar {
   width: 8px;
 }
@@ -530,6 +564,7 @@ button {
 .asset-list::-webkit-scrollbar-track,
 .inspector-shell > .system-inspector-grid::-webkit-scrollbar-track,
 .inspector-shell > .inspector-stack::-webkit-scrollbar-track,
+.inspector-shell > .batch-report-view::-webkit-scrollbar-track,
 .event-list::-webkit-scrollbar-track {
   background: rgba(5, 8, 9, 0.5);
 }
@@ -537,6 +572,7 @@ button {
 .asset-list::-webkit-scrollbar-thumb,
 .inspector-shell > .system-inspector-grid::-webkit-scrollbar-thumb,
 .inspector-shell > .inspector-stack::-webkit-scrollbar-thumb,
+.inspector-shell > .batch-report-view::-webkit-scrollbar-thumb,
 .event-list::-webkit-scrollbar-thumb {
   background: rgba(120, 185, 75, 0.42);
 }
@@ -648,6 +684,10 @@ button {
   background: rgba(5, 8, 9, 0.36);
 }
 
+.inspector-heading.report-mode {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
 .inspector-heading div {
   display: grid;
   gap: 4px;
@@ -671,6 +711,24 @@ button {
   text-transform: uppercase;
 }
 
+.inspector-back-button {
+  display: inline-grid;
+  grid-template-columns: 16px auto;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid rgba(188, 205, 198, 0.18);
+  color: #cbd5d1;
+  background: rgba(5, 8, 9, 0.52);
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.065em;
+  line-height: 1;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
 .system-inspector-grid,
 .inspector-stack,
 .batch-report-view {
@@ -689,6 +747,7 @@ button {
 
 .batch-report-view {
   align-content: start;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .system-inspector-grid {
@@ -704,44 +763,99 @@ button {
 .inspector-facts,
 .related-telemetry,
 .last-event,
-.report-summary-block,
+.report-header-block,
+.report-section,
 .report-summary-copy {
   border: 1px solid rgba(188, 205, 198, 0.12);
   background: rgba(0, 0, 0, 0.16);
 }
 
-.report-summary-block {
+.report-header-block {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 180px;
-  gap: 8px;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
   min-width: 0;
-  padding: 10px;
+  padding: 12px;
 }
 
-.report-summary-block div {
+.report-header-block div {
   display: grid;
-  align-content: center;
   gap: 5px;
   min-width: 0;
-  min-height: 58px;
-  padding: 8px;
-  border: 1px solid rgba(188, 205, 198, 0.1);
-  background: rgba(5, 8, 9, 0.3);
 }
 
-.report-summary-block strong {
+.report-header-block strong {
   overflow: hidden;
   color: #e0e8e4;
-  font-size: 18px;
+  font-size: 20px;
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.report-summary-block small {
+.report-header-block small {
   overflow: hidden;
   color: var(--muted);
   font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-section {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.report-section h3 {
+  margin: 0;
+  color: #cdd6d2;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0.065em;
+  text-transform: uppercase;
+}
+
+.report-section dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.report-section div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 8px;
+  border: 1px solid rgba(188, 205, 198, 0.1);
+  background: rgba(5, 8, 9, 0.3);
+}
+
+.report-section dt {
+  overflow: hidden;
+  color: #a7b2ae;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.report-section dd {
+  overflow: hidden;
+  margin: 0;
+  color: #dce3e0;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -896,6 +1010,7 @@ button.active,
 
 .report-summary-copy {
   display: grid;
+  grid-column: 1 / -1;
   align-content: center;
   gap: 6px;
   min-height: 64px;

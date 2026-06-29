@@ -75,7 +75,7 @@ export function rehydrateOperationsCockpit(
         currentDay: day,
         cycleLengthDays: blueprint.batch.cycleLengthDays,
         cycleProgress,
-        phase: 'Production',
+        phase: 'Flowering',
         lifecycleState,
         readyForReview: lifecycleState === 'ready',
       },

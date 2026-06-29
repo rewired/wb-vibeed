@@ -18,7 +18,7 @@ export type SeverityLevel = EventSeverity;
 export type OperatingMode = 'Eco' | 'Balanced' | 'Push';
 export type ControlState = 'Auto' | 'Manual';
 export type SimSpeed = 1 | 2 | 4 | 8;
-export type OperationalPhase = 'Startup' | 'Build' | 'Production' | 'Late Cycle' | 'Ready' | 'Completed';
+export type OperationalPhase = 'Seedling' | 'Vegetative' | 'Flowering' | 'Late Flower' | 'Harvest Ready' | 'Completed';
 export type BatchLifecycleState = 'active' | 'ready' | 'completed';
 export type RuntimeWarningKey =
   | 'cycle-ready'

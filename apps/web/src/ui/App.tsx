@@ -148,6 +148,7 @@ export function App() {
             state={displayState}
             selectedObject={selectedObject}
             showBatchReport={showBatchReport}
+            onBackToInspector={() => setShowBatchReport(false)}
             onModeChange={handleControlModeChange}
             onControlChange={handleControlStateChange}
           />
@@ -279,6 +280,7 @@ function RoomContext({
   const cycle = batchCycleSummary(state);
   const roomContext = `${state.roomOverview.roomId} / ${state.roomOverview.zoneId} - Batch ${state.roomOverview.batchId}`;
   const batchGroups = batchContextGroups(state);
+  const showLifecycleAction = cycle.lifecycleState === 'ready' || cycle.lifecycleState === 'completed';
 
   return (
     <Panel
@@ -297,33 +299,26 @@ function RoomContext({
           <ContextFact label="Room Context" value={roomContext} />
           <ContextFact label="Status" value={titleCase(state.roomOverview.status)} status={state.roomOverview.status} />
         </div>
-        <article className={`context-cycle status-${cycle.status}`}>
-          <div>
-            <span className="label">Cycle Progress</span>
-            <strong>{cycle.progress}%</strong>
-            {cycle.lifecycleState !== 'completed' ? <small>Day {cycle.currentDay} of {cycle.cycleLengthDays}</small> : null}
-            <small>Phase: {cycle.phase}</small>
-            {cycle.lifecycleState === 'ready' ? (
-              <div className="lifecycle-actions">
-                <b>Batch Ready for Review</b>
-                <button type="button" onClick={onCompleteBatch}>
-                  <Icon name="task_alt" size="sm" />
-                  <span>Complete Batch</span>
-                </button>
-              </div>
-            ) : null}
-            {cycle.lifecycleState === 'completed' ? (
-              <div className="lifecycle-actions">
-                <b>Batch Completed</b>
-                <button type="button" onClick={onViewReport}>
-                  <Icon name="article" size="sm" />
-                  <span>View Report</span>
-                </button>
-              </div>
-            ) : null}
-          </div>
-          <ProgressBar value={cycle.progress} />
-        </article>
+        <div className={`lifecycle-stack lifecycle-${cycle.lifecycleState}`}>
+          <article className={`context-cycle status-${cycle.status}`}>
+            <div className="cycle-copy">
+              <span className="label">Cycle Progress</span>
+              <strong>{cycle.progress}%</strong>
+              {cycle.lifecycleState !== 'completed' ? <small>Day {cycle.currentDay} of {cycle.cycleLengthDays}</small> : null}
+              <small>Phase: {cycle.phase}</small>
+            </div>
+            <ProgressBar value={cycle.progress} />
+          </article>
+          {showLifecycleAction ? (
+            <article className={`lifecycle-action-card lifecycle-action-${cycle.lifecycleState}`}>
+              <b>{cycle.lifecycleState === 'ready' ? 'Batch Harvest Ready' : 'Batch Completed'}</b>
+              <button type="button" onClick={cycle.lifecycleState === 'ready' ? onCompleteBatch : onViewReport}>
+                <Icon name={cycle.lifecycleState === 'ready' ? 'task_alt' : 'article'} size="sm" />
+                <span>{cycle.lifecycleState === 'ready' ? 'Complete Batch' : 'View Report'}</span>
+              </button>
+            </article>
+          ) : null}
+        </div>
         <div className="batch-context-facts">
           {batchGroups.map((group) => (
             <ContextGroup key={group.label} label={group.label} rows={group.rows} />
@@ -401,12 +396,14 @@ function ObjectInspector({
   state,
   selectedObject,
   showBatchReport,
+  onBackToInspector,
   onModeChange,
   onControlChange,
 }: {
   state: OperationsCockpitState;
   selectedObject: SelectedRoomObject;
   showBatchReport: boolean;
+  onBackToInspector: () => void;
   onModeChange: (controlId: string, mode: OperatingMode) => void;
   onControlChange: (controlId: string, controlValue: ControlState) => void;
 }) {
@@ -422,11 +419,17 @@ function ObjectInspector({
   return (
     <Panel className="object-inspector" title="Selected Object Inspector">
       <div className="inspector-shell">
-        <div className="inspector-heading">
+        <div className={showBatchReport && report ? 'inspector-heading report-mode' : 'inspector-heading'}>
           <div>
-            <span className="label">Selected Object</span>
+            <span className="label">{showBatchReport && report ? 'Inspector Mode' : 'Selected Object'}</span>
             <strong>{details.name}</strong>
           </div>
+          {showBatchReport && report ? (
+            <button className="inspector-back-button" type="button" onClick={onBackToInspector}>
+              <Icon name="arrow_back" size="sm" />
+              <span>Back to Inspector</span>
+            </button>
+          ) : null}
           <b className={`status-pill status-${details.statusLevel}`}>{details.status}</b>
         </div>
         <InspectorContent
@@ -509,37 +512,36 @@ function InspectorContent({
 function BatchReportInspector({ report }: { report: BatchReport }) {
   return (
     <div className="batch-report-view">
-      <section className="report-summary-block">
+      <section className="report-header-block">
         <div>
           <span className="label">Batch Report</span>
           <strong>Batch {report.batchId}</strong>
           <small>{report.roomId} / {report.zoneId}</small>
+          <small>Completed Day {report.completedDay} / Tick {report.completedTick}</small>
         </div>
-        <div>
-          <span className="label">Completed</span>
-          <strong>Day {report.completedDay}</strong>
-          <small>Tick {report.completedTick}</small>
-        </div>
+        <b className={`status-pill status-${report.finalStatus}`}>Final Status: {titleCase(report.finalStatus)}</b>
       </section>
-      <InspectorFacts
-        facts={[
-          ['Final Status', titleCase(report.finalStatus)],
-          ['Warnings', String(report.warningCount)],
-          ['Efficiency', `${report.efficiencyScore} score`],
-          ['Cycle Length', `${report.cycleLengthDays} days`],
-          ['Actual Runtime', `${report.actualDays} days`],
-        ]}
-      />
-      <InspectorFacts
-        facts={[
+      <ReportSection
+        title="Harvest Outcome"
+        rows={[
           ['Yield Estimate', `${report.finalYieldEstimate} units`],
           ['Quality Estimate', `${report.finalQualityEstimate}%`],
           ['Health Index', `${report.finalHealthIndex}/100`],
           ['Moisture Balance', `${report.finalMoistureBalance}%`],
         ]}
       />
-      <InspectorFacts
-        facts={[
+      <ReportSection
+        title="Operational Summary"
+        rows={[
+          ['Warning Count', String(report.warningCount)],
+          ['Efficiency Score', `${report.efficiencyScore} score`],
+          ['Actual Runtime Days', `${report.actualDays}`],
+          ['Planned Cycle Length', `${report.cycleLengthDays} days`],
+        ]}
+      />
+      <ReportSection
+        title="Cost Summary"
+        rows={[
           ['Total Energy', `${report.totalEnergyKwh.toLocaleString('en-US')} kWh`],
           ['Total Cost', formatValue(report.totalCost, '$')],
         ]}
@@ -549,6 +551,22 @@ function BatchReportInspector({ report }: { report: BatchReport }) {
         <strong>{report.summary}</strong>
       </article>
     </div>
+  );
+}
+
+function ReportSection({ title, rows }: { title: string; rows: [string, string][] }) {
+  return (
+    <section className="report-section">
+      <h3>{title}</h3>
+      <dl>
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
   );
 }
 
@@ -959,7 +977,7 @@ function roomAssets(state: OperationsCockpitState) {
   const canopy = capacityById(state.roomOverview.capacity, 'canopy-tables');
   const sensors = capacityById(state.roomOverview.capacity, 'sensor-points');
   const canopyStatus = state.batchRuntime.readyForReview
-    ? objectStatus('Ready for Review', 'Ready', 'task_alt', 'warning')
+    ? objectStatus('Harvest Ready', 'Ready', 'task_alt', 'warning')
     : objectStatus('Monitored', 'Watch', 'visibility', 'normal');
   const nutrientStatus = objectRuntimeStatus(state, 'nutrient', 'Online');
   const sensorStatus = objectRuntimeStatus(state, 'sensors', 'Online');
@@ -1175,7 +1193,7 @@ function objectRuntimeStatus(state: OperationsCockpitState, object: SelectedRoom
   }
 
   if (warning.key === 'cycle-ready') {
-    return objectStatus('Ready for Review', 'Ready', 'task_alt', 'warning');
+    return objectStatus('Harvest Ready', 'Ready', 'task_alt', 'warning');
   }
 
   return objectStatus('Warning', statusShortLabel('warning'), statusIcon('warning'), 'warning');
