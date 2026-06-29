@@ -9,6 +9,7 @@ import type {
   TrendTileState,
 } from './operations-cockpit-state-types';
 import {
+  createInitialBatchOutcomeAccumulators,
   deriveBatchDay,
   deriveCycleProgress,
   deriveGlobalDay,
@@ -88,6 +89,7 @@ export function rehydrateOperationsCockpit(
         phase,
         lifecycleState,
         readyForReview: lifecycleState === 'ready',
+        accumulators: createInitialBatchOutcomeAccumulators(),
       },
       batchStatus: rehydrateBatchStatus(blueprint, batchDay, cycleProgress),
       environmentalTelemetry: [

@@ -1,4 +1,5 @@
 import type {
+  BatchOutcomeAccumulators,
   BatchLifecycleState,
   BatchReport,
   ControlState,
@@ -41,7 +42,7 @@ export function advanceOperationsCockpitRuntime(
         ...state.simulation,
         tick: state.simulation.tick + 1,
       },
-    });
+    }, { accumulateBatchTick: true });
   }
 
   if (action.type === 'complete-batch') {
@@ -98,6 +99,7 @@ export function advanceOperationsCockpitRuntime(
           phase: 'Seedling',
           lifecycleState: 'active',
           readyForReview: false,
+          accumulators: createInitialBatchOutcomeAccumulators(),
         },
         batchStatus: resetBatchStatus(state.cockpit.batchStatus),
         eventLog: [event, ...state.cockpit.eventLog].slice(0, MAX_EVENT_LOG_ENTRIES),
@@ -140,14 +142,38 @@ export function initializeOperationsCockpitRuntime(state: OperationsCockpitRunti
   return deriveOperationsCockpitRuntime(state, { emitWarningEvents: false });
 }
 
+export function createInitialBatchOutcomeAccumulators(): BatchOutcomeAccumulators {
+  return {
+    elapsedTicks: 0,
+    stableTicks: 0,
+    warningTicks: 0,
+    energyKwh: 0,
+    operatingCost: 0,
+    manualInterventions: 0,
+    modeUsage: {
+      light: createEmptyModeUsage(),
+      climate: createEmptyModeUsage(),
+      irrigation: createEmptyModeUsage(),
+    },
+    stabilityScore: 100,
+    efficiencyScore: 100,
+    outcomeScore: 100,
+  };
+}
+
 export function generateBatchReport(state: OperationsCockpitRuntimeState): BatchReport {
   const cycleLengthDays = state.baseline.batch.cycleLengthDays;
   const actualDays = deriveBatchDay(state.simulation.tick, state.baseline.batch.startTick, state.simulation.ticksPerDay);
   const completedDay = deriveGlobalDay(state.simulation.tick, state.simulation.ticksPerDay);
   const warningCount = state.cockpit.warningConditions.length;
   const finalStatus = warningCount > 0 ? 'warning' : state.cockpit.roomOverview.status;
-  const dailyEnergy = numericMetric(state.cockpit.energyCost, 'Daily Energy', 0);
-  const dailyCost = numericMetric(state.cockpit.energyCost, 'Daily Cost', 0);
+  const accumulators = state.cockpit.batchRuntime.accumulators;
+  const baseHealthIndex = numericMetric(state.cockpit.batchStatus, 'Batch Health Index', 0);
+  const baseQualityEstimate = numericMetric(state.cockpit.batchStatus, 'Quality Estimate', 0);
+  const baseYieldForecast = numericMetric(state.cockpit.batchStatus, 'Yield Forecast', 0);
+  const finalHealthIndex = clamp(Math.round(baseHealthIndex * 0.6 + accumulators.stabilityScore * 0.4), 0, 100);
+  const finalQualityEstimate = clamp(Math.round(baseQualityEstimate * 0.5 + accumulators.outcomeScore * 0.5), 0, 100);
+  const finalYieldEstimate = Math.round(baseYieldForecast * (0.75 + accumulators.outcomeScore / 400));
 
   return {
     batchId: state.cockpit.roomOverview.batchId,
@@ -157,16 +183,22 @@ export function generateBatchReport(state: OperationsCockpitRuntimeState): Batch
     completedTick: state.simulation.tick,
     cycleLengthDays,
     actualDays,
-    finalHealthIndex: numericMetric(state.cockpit.batchStatus, 'Batch Health Index', 0),
+    finalHealthIndex,
     finalMoistureBalance: numericMetric(state.cockpit.batchStatus, 'Moisture Balance', 0),
-    finalQualityEstimate: numericMetric(state.cockpit.batchStatus, 'Quality Estimate', 0),
-    finalYieldEstimate: numericMetric(state.cockpit.batchStatus, 'Yield Forecast', 0),
-    totalEnergyKwh: round(dailyEnergy * actualDays, 1),
-    totalCost: round(dailyCost * actualDays, 2),
-    efficiencyScore: numericMetric(state.cockpit.energyCost, 'Efficiency', 0),
+    finalQualityEstimate,
+    finalYieldEstimate,
+    totalEnergyKwh: round(accumulators.energyKwh, 1),
+    totalCost: round(accumulators.operatingCost, 2),
+    elapsedTicks: accumulators.elapsedTicks,
+    stableTicks: accumulators.stableTicks,
+    warningTicks: accumulators.warningTicks,
+    manualInterventions: accumulators.manualInterventions,
+    stabilityScore: accumulators.stabilityScore,
+    efficiencyScore: accumulators.efficiencyScore,
+    outcomeScore: accumulators.outcomeScore,
     warningCount,
     finalStatus,
-    summary: batchReportSummary(actualDays, cycleLengthDays, warningCount),
+    summary: batchReportSummary(actualDays, cycleLengthDays, accumulators),
   };
 }
 
@@ -191,11 +223,18 @@ function applyControlChange(
   });
 
   const event = controlChangeEvent(state, control.label, target, value);
+  const accumulators = shouldUpdateBatchAccumulators(state.cockpit.batchRuntime.lifecycleState)
+    ? incrementManualInterventions(state.cockpit.batchRuntime.accumulators)
+    : state.cockpit.batchRuntime.accumulators;
 
   return deriveOperationsCockpitRuntime({
     ...state,
     cockpit: {
       ...state.cockpit,
+      batchRuntime: {
+        ...state.cockpit.batchRuntime,
+        accumulators,
+      },
       controls,
       eventLog: [event, ...state.cockpit.eventLog].slice(0, MAX_EVENT_LOG_ENTRIES),
     },
@@ -204,7 +243,7 @@ function applyControlChange(
 
 function deriveOperationsCockpitRuntime(
   state: OperationsCockpitRuntimeState,
-  options: { emitWarningEvents?: boolean } = {},
+  options: { emitWarningEvents?: boolean; accumulateBatchTick?: boolean } = {},
 ): OperationsCockpitRuntimeState {
   const globalDay = deriveGlobalDay(state.simulation.tick, state.simulation.ticksPerDay);
   const batchDay = deriveBatchDay(state.simulation.tick, state.baseline.batch.startTick, state.simulation.ticksPerDay);
@@ -213,16 +252,6 @@ function deriveOperationsCockpitRuntime(
   const lifecycleState = deriveBatchLifecycleState(state.cockpit.batchRuntime.lifecycleState, cycleProgress);
   const phase = lifecycleState === 'completed' ? 'Completed' : deriveOperationalPhase(cycleProgress);
   const readyForReview = lifecycleState === 'ready';
-  const batchRuntime = {
-    batchDay,
-    cycleLengthDays,
-    startTick: state.baseline.batch.startTick,
-    cycleProgress,
-    phase,
-    lifecycleState,
-    readyForReview,
-    ...(state.cockpit.batchRuntime.report ? { report: state.cockpit.batchRuntime.report } : {}),
-  };
   const controls = deriveControls(state.cockpit.controls);
   const metrics = deriveTelemetry({ ...state, cockpit: { ...state.cockpit, controls } });
   const warnings = deriveWarnings(state, metrics, batchDay, cycleProgress, readyForReview);
@@ -231,6 +260,28 @@ function deriveOperationsCockpitRuntime(
   const powerNow = derivePowerNow({ ...state, cockpit: { ...state.cockpit, controls } });
   const dailyEnergy = round(powerNow * 24, 1);
   const dailyCost = round(dailyEnergy * COST_PER_KWH, 2);
+  const accumulators = options.accumulateBatchTick && shouldUpdateBatchAccumulators(lifecycleState)
+    ? accumulateBatchTick({
+        accumulators: state.cockpit.batchRuntime.accumulators,
+        controls,
+        hasWarnings: warnings.length > 0,
+        powerNow,
+        dailyCost,
+        ticksPerDay: state.simulation.ticksPerDay,
+        baseHealthFactor: numericMetric(state.cockpit.batchStatus, 'Batch Health Index', 100),
+      })
+    : state.cockpit.batchRuntime.accumulators;
+  const batchRuntime = {
+    batchDay,
+    cycleLengthDays,
+    startTick: state.baseline.batch.startTick,
+    cycleProgress,
+    phase,
+    lifecycleState,
+    readyForReview,
+    accumulators,
+    ...(state.cockpit.batchRuntime.report ? { report: state.cockpit.batchRuntime.report } : {}),
+  };
   const utilityStatus = deriveUtilityStatus(state.cockpit.utilityStatus, warnings);
   const warningEvents = options.emitWarningEvents === false
     ? []
@@ -313,6 +364,115 @@ function resetBatchStatus(items: ProgressTileState[]): ProgressTileState[] {
 
     return { ...item, status: 'normal' };
   });
+}
+
+function createEmptyModeUsage(): Record<OperatingMode, number> {
+  return {
+    Eco: 0,
+    Balanced: 0,
+    Push: 0,
+  };
+}
+
+function shouldUpdateBatchAccumulators(lifecycleState: BatchLifecycleState) {
+  return lifecycleState === 'active' || lifecycleState === 'ready';
+}
+
+function incrementManualInterventions(accumulators: BatchOutcomeAccumulators): BatchOutcomeAccumulators {
+  return {
+    ...accumulators,
+    manualInterventions: accumulators.manualInterventions + 1,
+  };
+}
+
+function accumulateBatchTick({
+  accumulators,
+  controls,
+  hasWarnings,
+  powerNow,
+  dailyCost,
+  ticksPerDay,
+  baseHealthFactor,
+}: {
+  accumulators: BatchOutcomeAccumulators;
+  controls: ControlTileState[];
+  hasWarnings: boolean;
+  powerNow: number;
+  dailyCost: number;
+  ticksPerDay: number;
+  baseHealthFactor: number;
+}): BatchOutcomeAccumulators {
+  const modeUsage = {
+    light: { ...accumulators.modeUsage.light },
+    climate: { ...accumulators.modeUsage.climate },
+    irrigation: { ...accumulators.modeUsage.irrigation },
+  };
+
+  incrementModeUsage(modeUsage.light, controlByLabel(controls, 'Light')?.activeMode);
+  incrementModeUsage(modeUsage.climate, controlByLabel(controls, 'Climate')?.activeMode);
+  incrementModeUsage(modeUsage.irrigation, controlByLabel(controls, 'Irrigation')?.activeMode);
+
+  const elapsedTicks = accumulators.elapsedTicks + 1;
+  const warningTicks = accumulators.warningTicks + (hasWarnings ? 1 : 0);
+  const stableTicks = accumulators.stableTicks + (hasWarnings ? 0 : 1);
+  const energyKwh = round(accumulators.energyKwh + powerNow / ticksPerDay, 4);
+  const operatingCost = round(accumulators.operatingCost + dailyCost / ticksPerDay, 4);
+  const stabilityScore = clamp(Math.round((stableTicks / Math.max(1, elapsedTicks)) * 100), 0, 100);
+  const efficiencyScore = deriveEfficiencyScore({
+    modeUsage,
+    elapsedTicks,
+    warningTicks,
+    operatingCost,
+    ticksPerDay,
+  });
+  const outcomeScore = clamp(
+    Math.round(stabilityScore * 0.55 + efficiencyScore * 0.25 + baseHealthFactor * 0.2),
+    0,
+    100,
+  );
+
+  return {
+    ...accumulators,
+    elapsedTicks,
+    stableTicks,
+    warningTicks,
+    energyKwh,
+    operatingCost,
+    modeUsage,
+    stabilityScore,
+    efficiencyScore,
+    outcomeScore,
+  };
+}
+
+function incrementModeUsage(modeUsage: Record<OperatingMode, number>, mode: OperatingMode = 'Balanced') {
+  modeUsage[mode] += 1;
+}
+
+function deriveEfficiencyScore({
+  modeUsage,
+  elapsedTicks,
+  warningTicks,
+  operatingCost,
+  ticksPerDay,
+}: {
+  modeUsage: BatchOutcomeAccumulators['modeUsage'];
+  elapsedTicks: number;
+  warningTicks: number;
+  operatingCost: number;
+  ticksPerDay: number;
+}) {
+  const modeTickTotal = Math.max(1, elapsedTicks * 3);
+  const pushUsage = modeUsage.light.Push + modeUsage.climate.Push + modeUsage.irrigation.Push;
+  const ecoUsage = modeUsage.light.Eco + modeUsage.climate.Eco + modeUsage.irrigation.Eco;
+  const pushUsagePenalty = (pushUsage / modeTickTotal) * 22;
+  const ecoUsageBonus = (ecoUsage / modeTickTotal) * 8;
+  const warningPenalty = (warningTicks / Math.max(1, elapsedTicks)) * 28;
+  const elapsedDays = elapsedTicks / ticksPerDay;
+  const averageDailyCost = elapsedDays > 0 ? operatingCost / elapsedDays : 0;
+  const costPressure = clamp((averageDailyCost - 120) / 8, 0, 12);
+
+  return clamp(Math.round(100 - pushUsagePenalty + ecoUsageBonus - warningPenalty - costPressure), 0, 100);
 }
 
 function deriveTelemetry(state: OperationsCockpitRuntimeState): MetricTileState[] {
@@ -662,16 +822,35 @@ function targetFromMode(mode: OperatingMode) {
   return 'Nominal';
 }
 
-function batchReportSummary(actualDays: number, cycleLengthDays: number, warningCount: number) {
+function batchReportSummary(
+  actualDays: number,
+  cycleLengthDays: number,
+  accumulators: BatchOutcomeAccumulators,
+) {
+  const warningRatio = accumulators.warningTicks / Math.max(1, accumulators.elapsedTicks);
+  const pushUsageRatio = totalPushModeUsage(accumulators) / Math.max(1, accumulators.elapsedTicks * 3);
+
   if (actualDays > cycleLengthDays) {
-    return 'Batch completed after extended runtime. Review warning history before starting the next batch.';
+    return 'Batch completed after extended runtime with accumulated operating history included.';
   }
 
-  if (warningCount > 0) {
-    return 'Batch completed with warning conditions present at review time.';
+  if (warningRatio >= 0.25) {
+    return 'Batch completed with warning conditions affecting overall outcome score.';
   }
 
-  return 'Batch completed with stable operating conditions and minor warnings.';
+  if (pushUsageRatio >= 0.45 && accumulators.operatingCost > 0) {
+    return 'Batch completed with high push-mode usage and elevated operating cost.';
+  }
+
+  if (accumulators.manualInterventions >= 5) {
+    return 'Batch completed with stable operating conditions and elevated intervention load.';
+  }
+
+  return 'Batch completed with stable operating conditions and low intervention load.';
+}
+
+function totalPushModeUsage(accumulators: BatchOutcomeAccumulators) {
+  return accumulators.modeUsage.light.Push + accumulators.modeUsage.climate.Push + accumulators.modeUsage.irrigation.Push;
 }
 
 function titleCase(value: string) {

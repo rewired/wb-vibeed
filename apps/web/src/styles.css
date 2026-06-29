@@ -693,7 +693,8 @@ button {
 .report-header-block,
 .report-section,
 .report-summary-copy,
-.report-action-footer {
+.report-action-footer,
+.batch-performance-panel {
   border: 1px solid rgba(188, 205, 198, 0.12);
   background: rgba(0, 0, 0, 0.16);
 }
@@ -968,7 +969,8 @@ button.active,
 .canopy-batch-overview,
 .lifecycle-panel,
 .canopy-report-summary,
-.recent-reports-panel {
+.recent-reports-panel,
+.batch-performance-panel {
   border: 1px solid rgba(188, 205, 198, 0.12);
   background: rgba(0, 0, 0, 0.16);
 }
@@ -1005,6 +1007,70 @@ button.active,
   overflow: hidden;
   color: var(--muted);
   font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-performance-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.batch-performance-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.batch-performance-header strong {
+  overflow: hidden;
+  color: #dce3e0;
+  font-size: 11px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.batch-performance-panel dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.batch-performance-panel dl div {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px;
+  border: 1px solid rgba(188, 205, 198, 0.1);
+  background: rgba(5, 8, 9, 0.3);
+}
+
+.batch-performance-panel dt {
+  overflow: hidden;
+  color: #a7b2ae;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.batch-performance-panel dd {
+  overflow: hidden;
+  margin: 0;
+  color: #dce3e0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

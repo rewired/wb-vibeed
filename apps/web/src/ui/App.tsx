@@ -3,6 +3,7 @@ import blueprintData from './operations-cockpit-blueprint.json';
 import { rehydrateOperationsCockpit } from './operations-cockpit-rehydrate';
 import { advanceOperationsCockpitRuntime } from './operations-cockpit-runtime';
 import type {
+  BatchOutcomeAccumulators,
   BatchReport,
   BatchLifecycleState,
   ControlState,
@@ -571,9 +572,20 @@ function BatchReportInspector({
         title="Operational Summary"
         rows={[
           ['Warning Count', String(report.warningCount)],
-          ['Efficiency Score', `${report.efficiencyScore} score`],
           ['Actual Runtime Days', `${report.actualDays}`],
           ['Planned Cycle Length', `${report.cycleLengthDays} days`],
+          ['Elapsed Batch Ticks', String(report.elapsedTicks)],
+          ['Stable Operation Ticks', String(report.stableTicks)],
+        ]}
+      />
+      <ReportSection
+        title="Operational Performance"
+        rows={[
+          ['Stability Score', `${report.stabilityScore}%`],
+          ['Efficiency Score', `${report.efficiencyScore}%`],
+          ['Outcome Score', `${report.outcomeScore}%`],
+          ['Warning Ticks', String(report.warningTicks)],
+          ['Manual Interventions', String(report.manualInterventions)],
         ]}
       />
       <ReportSection
@@ -600,6 +612,35 @@ function BatchReportInspector({
         ) : null}
       </footer>
     </div>
+  );
+}
+
+function BatchPerformanceSummary({ accumulators }: { accumulators: BatchOutcomeAccumulators }) {
+  return (
+    <section className="batch-performance-panel" aria-label="Batch performance">
+      <div className="batch-performance-header">
+        <span className="label">Batch Performance</span>
+        <strong>{accumulators.outcomeScore}% outcome</strong>
+      </div>
+      <dl>
+        <div>
+          <dt>Stability</dt>
+          <dd>{accumulators.stabilityScore}%</dd>
+        </div>
+        <div>
+          <dt>Efficiency</dt>
+          <dd>{accumulators.efficiencyScore}%</dd>
+        </div>
+        <div>
+          <dt>Warnings</dt>
+          <dd>{accumulators.warningTicks} ticks</dd>
+        </div>
+        <div>
+          <dt>Interventions</dt>
+          <dd>{accumulators.manualInterventions}</dd>
+        </div>
+      </dl>
+    </section>
   );
 }
 
@@ -755,6 +796,8 @@ function CanopyInspector({
           <ProgressBar value={runtime.cycleProgress} />
         </article>
       </section>
+
+      <BatchPerformanceSummary accumulators={runtime.accumulators} />
 
       <section className={`lifecycle-panel status-${lifecycleStatus}`} aria-label="Batch lifecycle actions">
         <div className="lifecycle-panel-header">

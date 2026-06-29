@@ -154,6 +154,21 @@ export interface WarningConditionState {
   object: SelectedRoomObject;
 }
 
+export type BatchModeUsage = Record<OperationsCockpitControlSystem, Record<OperatingMode, number>>;
+
+export interface BatchOutcomeAccumulators {
+  elapsedTicks: number;
+  stableTicks: number;
+  warningTicks: number;
+  energyKwh: number;
+  operatingCost: number;
+  manualInterventions: number;
+  modeUsage: BatchModeUsage;
+  stabilityScore: number;
+  efficiencyScore: number;
+  outcomeScore: number;
+}
+
 export interface BatchReport {
   batchId: string;
   roomId: string;
@@ -168,7 +183,13 @@ export interface BatchReport {
   finalYieldEstimate: number;
   totalEnergyKwh: number;
   totalCost: number;
+  elapsedTicks: number;
+  stableTicks: number;
+  warningTicks: number;
+  manualInterventions: number;
+  stabilityScore: number;
   efficiencyScore: number;
+  outcomeScore: number;
   warningCount: number;
   finalStatus: StatusLevel;
   summary: string;
@@ -182,6 +203,7 @@ export interface BatchRuntimeSummaryState {
   phase: OperationalPhase;
   lifecycleState: BatchLifecycleState;
   readyForReview: boolean;
+  accumulators: BatchOutcomeAccumulators;
   report?: BatchReport;
 }
 
