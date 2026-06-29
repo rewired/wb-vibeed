@@ -279,6 +279,7 @@ function RoomContext({
             <span className="label">Cycle Progress</span>
             <strong>{cycle.progress}%</strong>
             <small>Day {cycle.currentDay} of {cycle.cycleLengthDays}</small>
+            <small>Phase: {cycle.phase}</small>
           </div>
           <ProgressBar value={cycle.progress} />
         </article>
@@ -980,9 +981,17 @@ function batchCycleSummary(state: OperationsCockpitState) {
   return {
     currentDay,
     cycleLengthDays,
+    phase: state.roomOverview.phase || lifecyclePhaseFromProgress(progress),
     progress,
     status: cycleProgress?.status ?? state.roomOverview.status,
   };
+}
+
+function lifecyclePhaseFromProgress(progress: number) {
+  if (progress <= 15) return 'Seedling';
+  if (progress <= 45) return 'Vegetative';
+  if (progress <= 85) return 'Flowering';
+  return 'Late Cycle';
 }
 
 function formatInspectorValue(tuning?: ControlTileState['primaryTuning']) {

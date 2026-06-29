@@ -887,15 +887,15 @@ button.active,
 .metric-body {
   display: grid;
   grid-template-rows: 20px 14px minmax(0, 1fr);
-  justify-items: start;
+  justify-items: center;
   gap: 4px;
   min-height: 0;
-  text-align: left;
+  text-align: center;
 }
 
 .metric-visual {
   display: grid;
-  place-items: end start;
+  place-items: center;
   width: 100%;
   min-height: 0;
 }
@@ -950,8 +950,8 @@ button.active,
 }
 
 .sparkline {
-  width: 100%;
-  height: 72px;
+  width: min(180px, 100%);
+  height: 54px;
 }
 
 .sparkline-grid {
