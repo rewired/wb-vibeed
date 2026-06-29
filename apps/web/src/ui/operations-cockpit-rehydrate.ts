@@ -5,6 +5,7 @@ import type {
   OperationsCockpitRuntimeState,
   ProgressTileState,
   RoomCapacityItemState,
+  TelemetryKey,
   TrendTileState,
 } from './operations-cockpit-state-types';
 
@@ -51,7 +52,6 @@ export function rehydrateOperationsCockpit(
         stats: [
           { label: 'Day', value: day },
           { label: 'Tick', value: blueprint.simulation.initialTick },
-          { label: 'Phase', value: blueprint.batch.phase, status: blueprint.batch.status },
           { label: 'Overall Status', value: statusLabel, status: blueprint.room.status },
           { label: 'Facility Load', value: blueprint.energy.powerNow, unit: 'kW', status: 'normal' },
           { label: 'Cost Today', value: blueprint.energy.dailyCost, unit: '$', status: 'normal' },
@@ -334,7 +334,7 @@ function rehydrateTelemetryTrends(blueprint: OperationsCockpitBlueprint): TrendT
   ];
 }
 
-function metric(id: string, label: string, source: BlueprintMetric): MetricTileState {
+function metric(id: TelemetryKey, label: string, source: BlueprintMetric): MetricTileState {
   return {
     id,
     label,
@@ -345,7 +345,7 @@ function metric(id: string, label: string, source: BlueprintMetric): MetricTileS
   };
 }
 
-function trend(id: string, label: string, unit: string, currentValue: number, offsets: number[]): TrendTileState {
+function trend(id: TrendTileState['id'], label: string, unit: string, currentValue: number, offsets: number[]): TrendTileState {
   return {
     id,
     label,

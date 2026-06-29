@@ -14,20 +14,30 @@ import type {
   OperationsCockpitControlSystem,
   OperationsCockpitRuntimeAction,
   OperationsCockpitState,
-  ProgressTileState,
   RoomCapacityItemState,
   SelectedRoomObject,
   SimSpeed,
   SimulationRuntimeState,
-  TelemetryPanelMode,
+  TelemetryKey,
+  TelemetryTileMode,
+  TelemetryViewModes,
   TrendTileState,
 } from './operations-cockpit-state-types';
 
 const initialRuntimeState = rehydrateOperationsCockpit(blueprintData as OperationsCockpitBlueprint);
 const modeOptions = ['Eco', 'Balanced', 'Push'] as const;
 const controlOptions = ['Auto', 'Manual'] as const;
-const telemetryModeOptions = ['current', 'trends'] as const satisfies readonly TelemetryPanelMode[];
+const telemetryModeOptions = ['current', 'trend'] as const satisfies readonly TelemetryTileMode[];
 const speedOptions = [1, 2, 4, 8] as const satisfies readonly SimSpeed[];
+const initialTelemetryViewModes: TelemetryViewModes = {
+  'air-temperature': 'current',
+  'relative-humidity': 'current',
+  'co2-index': 'current',
+  'light-output': 'current',
+  'irrigation-index': 'current',
+  airflow: 'current',
+  'nutrient-reservoir': 'current',
+};
 const BASE_TICK_MS = 1000;
 
 function Icon({
@@ -66,8 +76,8 @@ function controlSystemFromId(controlId: string): OperationsCockpitControlSystem 
 
 export function App() {
   const [runtime, setRuntime] = useState(() => initialRuntimeState);
-  const [selectedObject, setSelectedObject] = useState<SelectedRoomObject>('batch');
-  const [telemetryMode, setTelemetryMode] = useState<TelemetryPanelMode>('current');
+  const [selectedObject, setSelectedObject] = useState<SelectedRoomObject>('lighting');
+  const [telemetryViewModes, setTelemetryViewModes] = useState<TelemetryViewModes>(initialTelemetryViewModes);
   const [eventDrawerState, setEventDrawerState] = useState<EventLogDrawerState>('collapsed');
   const runtimeState = runtime.simulation;
   const displayState = runtime.cockpit;
@@ -102,6 +112,10 @@ export function App() {
     setEventDrawerState((current) => (current === 'collapsed' ? 'expanded' : 'collapsed'));
   }
 
+  function handleTelemetryModeChange(metricId: TelemetryKey, mode: TelemetryTileMode) {
+    setTelemetryViewModes((current) => ({ ...current, [metricId]: mode }));
+  }
+
   return (
     <main className="cockpit-shell" aria-label="Operations Cockpit static prototype">
       <Header state={displayState} runtimeState={runtimeState} dispatch={dispatch} />
@@ -121,8 +135,8 @@ export function App() {
           <EnvironmentalTelemetry
             items={displayState.environmentalTelemetry}
             trends={displayState.telemetryTrends}
-            mode={telemetryMode}
-            onModeChange={setTelemetryMode}
+            viewModes={telemetryViewModes}
+            onModeChange={handleTelemetryModeChange}
           />
         </section>
       </div>
@@ -239,6 +253,9 @@ function RoomContext({
   eventCount: number;
   onToggleEvents: () => void;
 }) {
+  const cycle = batchCycleSummary(state);
+  const batchFacts = batchContextFacts(state);
+
   return (
     <Panel
       className="room-context-panel"
@@ -251,11 +268,26 @@ function RoomContext({
         </button>
       )}
     >
-      <div className="room-context-strip" aria-label="Active operational context">
-        <ContextFact label="Room / Zone" value={`${state.roomOverview.roomId} / ${state.roomOverview.zoneId}`} />
-        <ContextFact label="Batch" value={state.roomOverview.batchId} />
-        <ContextFact label="Phase" value={state.roomOverview.phase} />
-        <ContextFact label="Status" value={titleCase(state.roomOverview.status)} status={state.roomOverview.status} />
+      <div className="room-context-grid" aria-label="Active operational context">
+        <div className="room-context-strip">
+          <ContextFact label="Room / Zone" value={`${state.roomOverview.roomId} / ${state.roomOverview.zoneId}`} />
+          <ContextFact label="Batch" value={state.roomOverview.batchId} />
+          <ContextFact label="Phase" value={state.roomOverview.phase} />
+          <ContextFact label="Status" value={titleCase(state.roomOverview.status)} status={state.roomOverview.status} />
+        </div>
+        <article className={`context-cycle status-${cycle.status}`}>
+          <div>
+            <span className="label">Cycle Progress</span>
+            <strong>{cycle.progress}%</strong>
+            <small>Day {cycle.currentDay} of {cycle.cycleLengthDays}</small>
+          </div>
+          <ProgressBar value={cycle.progress} />
+        </article>
+        <div className="batch-context-facts">
+          {batchFacts.map(([label, value]) => (
+            <ContextFact key={label} label={label} value={value} />
+          ))}
+        </div>
       </div>
     </Panel>
   );
@@ -282,7 +314,7 @@ function RoomAssetsList({
   const assets = roomAssets(state);
 
   return (
-    <Panel className="room-assets" title="Room Systems & Assets">
+    <Panel className="room-assets" title="Room Objects">
       <div className="asset-list" aria-label="Selectable room systems and assets">
         {assets.map((asset) => (
           <button
@@ -351,13 +383,13 @@ function InspectorContent({
   onModeChange: (controlId: string, mode: OperatingMode) => void;
   onControlChange: (controlId: string, controlValue: ControlState) => void;
 }) {
-  if (selectedObject === 'batch') return <BatchInspector state={state} />;
   if (selectedObject === 'lighting') {
     return (
       <ControlledSystemInspector
         state={state}
         system="lighting"
         control={controlByLabel(state.controls, 'Light')}
+        targetLabel="Target"
         metrics={['light-output']}
         fallbackEvent="No recent lighting event"
         onModeChange={onModeChange}
@@ -371,6 +403,7 @@ function InspectorContent({
         state={state}
         system="climate"
         control={controlByLabel(state.controls, 'Climate')}
+        targetLabel="Target Bias"
         metrics={['air-temperature', 'relative-humidity', 'airflow']}
         fallbackEvent="No recent climate event"
         onModeChange={onModeChange}
@@ -384,6 +417,7 @@ function InspectorContent({
         state={state}
         system="irrigation"
         control={controlByLabel(state.controls, 'Irrigation')}
+        targetLabel="Target Bias"
         metrics={['irrigation-index']}
         fallbackEvent="No recent irrigation event"
         onModeChange={onModeChange}
@@ -397,35 +431,11 @@ function InspectorContent({
   return <ExhaustInspector state={state} />;
 }
 
-function BatchInspector({ state }: { state: OperationsCockpitState }) {
-  const cycle = batchCycleSummary(state);
-  const kpis = state.batchStatus.filter((item) => item.id !== 'cycle-progress');
-  const lastEvent = lastEventForObject(state.eventLog, 'batch', 'No recent batch event');
-
-  return (
-    <div className="batch-inspector">
-      <article className={`cycle-card status-${cycle.status}`}>
-        <div>
-          <span className="label">Cycle Progress</span>
-          <strong>{cycle.progress}%</strong>
-          <small>Day {cycle.currentDay} of {cycle.cycleLengthDays}</small>
-        </div>
-        <ProgressBar value={cycle.progress} />
-      </article>
-      <div className="batch-kpi-grid">
-        {kpis.map((item) => (
-          <KpiTile key={item.id} item={item} />
-        ))}
-      </div>
-      <LastEvent event={lastEvent} />
-    </div>
-  );
-}
-
 function ControlledSystemInspector({
   state,
   system,
   control,
+  targetLabel,
   metrics,
   fallbackEvent,
   onModeChange,
@@ -434,7 +444,8 @@ function ControlledSystemInspector({
   state: OperationsCockpitState;
   system: SelectedRoomObject;
   control: ControlTileState | undefined;
-  metrics: string[];
+  targetLabel: 'Target' | 'Target Bias';
+  metrics: TelemetryKey[];
   fallbackEvent: string;
   onModeChange: (controlId: string, mode: OperatingMode) => void;
   onControlChange: (controlId: string, controlValue: ControlState) => void;
@@ -459,8 +470,8 @@ function ControlledSystemInspector({
           </div>
           <InspectorFacts
             facts={[
-              ['Target', formatInspectorValue(control.primaryTuning)],
               ['Status', 'Online'],
+              [targetLabel, formatInspectorValue(control.primaryTuning)],
             ]}
           />
         </div>
@@ -473,17 +484,15 @@ function ControlledSystemInspector({
 
 function NutrientInspector({ state }: { state: OperationsCockpitState }) {
   const reservoir = metricById(state.environmentalTelemetry, 'nutrient-reservoir');
-  const capacity = capacityById(state.roomOverview.capacity, 'nutrient-reservoirs');
 
   return (
     <div className="inspector-stack">
       <InspectorFacts
         facts={[
           ['Status', 'Online'],
-          ['Reservoir Connection', 'Connected'],
-          ['Nutrient Reservoir', reservoir ? formatValue(reservoir.value, reservoir.unit) : 'Unavailable'],
+          ['Reservoir Connected', 'Yes'],
+          ['Nutrient Reservoir %', reservoir ? formatValue(reservoir.value, reservoir.unit) : 'Unavailable'],
           ['Refill Threshold', reservoir?.reference?.replace('Refill Threshold ', '') ?? '20 %'],
-          ['Reservoirs Online', capacity ? `${capacity.online ?? 0} / ${capacity.total}` : '1 / 1'],
         ]}
       />
       <LastEvent event={lastEventForObject(state.eventLog, 'nutrient', 'Reservoir connected')} />
@@ -495,21 +504,23 @@ function CanopyInspector({ state }: { state: OperationsCockpitState }) {
   const canopy = capacityById(state.roomOverview.capacity, 'canopy-tables');
 
   return (
-    <InspectorFacts
-      facts={[
-        ['Tables Active', String(canopy?.active ?? 0)],
-        ['Tables Total', String(canopy?.total ?? 0)],
-        ['Zone', state.roomOverview.zoneId],
-        ['Batch', state.roomOverview.batchId],
-        ['Status', titleCase(state.roomOverview.status)],
-      ]}
-    />
+    <div className="inspector-stack">
+      <InspectorFacts
+        facts={[
+          ['Status', 'Monitored'],
+          ['Tables Active', `${canopy?.active ?? 0} active`],
+          ['Batch Reference', state.roomOverview.batchId],
+          ['Plant Detail Model', 'Not available in Iteration 1'],
+        ]}
+      />
+    </div>
   );
 }
 
 function SensorsInspector({ state }: { state: OperationsCockpitState }) {
   const sensors = capacityById(state.roomOverview.capacity, 'sensor-points');
-  const coverage = ['air-temperature', 'relative-humidity', 'co2-index', 'airflow']
+  const coverageMetricIds: TelemetryKey[] = ['air-temperature', 'relative-humidity', 'co2-index', 'airflow'];
+  const coverage = coverageMetricIds
     .map((id) => metricById(state.environmentalTelemetry, id)?.label)
     .filter(Boolean)
     .join(' / ');
@@ -518,13 +529,13 @@ function SensorsInspector({ state }: { state: OperationsCockpitState }) {
     <div className="inspector-stack">
       <InspectorFacts
         facts={[
-          ['Sensor Points Online', String(sensors?.online ?? 0)],
-          ['Sensor Points Total', String(sensors?.total ?? 0)],
           ['Status', titleCase(state.roomOverview.status)],
+          ['Sensor Points Online', `${sensors?.online ?? 0} / ${sensors?.total ?? 0}`],
           ['Telemetry Coverage', coverage],
         ]}
       />
       <RelatedTelemetry state={state} metricIds={['air-temperature', 'relative-humidity', 'co2-index', 'airflow']} />
+      <LastEvent event={lastEventForObject(state.eventLog, 'sensors', 'No recent sensor network event')} />
     </div>
   );
 }
@@ -546,7 +557,7 @@ function ExhaustInspector({ state }: { state: OperationsCockpitState }) {
   );
 }
 
-function RelatedTelemetry({ state, metricIds }: { state: OperationsCockpitState; metricIds: string[] }) {
+function RelatedTelemetry({ state, metricIds }: { state: OperationsCockpitState; metricIds: TelemetryKey[] }) {
   const metrics = metricIds.map((id) => metricById(state.environmentalTelemetry, id)).filter((item): item is MetricTileState => Boolean(item));
 
   return (
@@ -583,49 +594,38 @@ function LastEvent({ event }: { event: string }) {
   );
 }
 
-function KpiTile({ item }: { item: ProgressTileState }) {
-  return (
-    <article className={`batch-kpi ${item.status ? `status-${item.status}` : ''}`}>
-      <span className="label">{compactBatchLabel(item.label)}</span>
-      <strong>{formatValue(item.value, item.unit)}</strong>
-      {item.secondary ? <small>{item.secondary}</small> : null}
-    </article>
-  );
-}
-
 function EnvironmentalTelemetry({
   items,
   trends,
-  mode,
+  viewModes,
   onModeChange,
 }: {
   items: MetricTileState[];
   trends: TrendTileState[];
-  mode: TelemetryPanelMode;
-  onModeChange: (mode: TelemetryPanelMode) => void;
+  viewModes: TelemetryViewModes;
+  onModeChange: (metricId: TelemetryKey, mode: TelemetryTileMode) => void;
 }) {
-  const trendItems = trends.filter((trend) => (
-    trend.id === 'air-temperature-trend'
-    || trend.id === 'relative-humidity-trend'
-    || trend.id === 'irrigation-index-trend'
-    || trend.id === 'airflow-trend'
-  ));
-
   return (
-    <Panel
-      className="environmental-telemetry"
-      title="Environmental Telemetry"
-      toolbar={<SegmentedControl items={telemetryModeOptions} active={mode} onChange={onModeChange} />}
-    >
-      {mode === 'current' ? (
-        <div className="metric-grid">
-          {items.map((item) => <MetricTile key={item.id} item={item} />)}
-        </div>
-      ) : (
-        <div className="trend-grid">
-          {trendItems.map((trend) => <TrendTile key={trend.id} item={trend} />)}
-        </div>
-      )}
+    <Panel className="environmental-telemetry" title="Environmental Telemetry">
+      <div className="metric-grid">
+        {items.map((item) => {
+          if (!isTelemetryKey(item.id)) return null;
+
+          const metricId = item.id;
+          const mode = viewModes[metricId];
+          const trend = trends.find((trendItem) => trendItem.id === trendIdForMetric(metricId));
+
+          return (
+            <MetricTile
+              key={item.id}
+              item={item}
+              mode={mode}
+              trend={trend}
+              onModeChange={(nextMode) => onModeChange(metricId, nextMode)}
+            />
+          );
+        })}
+      </div>
     </Panel>
   );
 }
@@ -687,17 +687,37 @@ function Panel({
   );
 }
 
-function MetricTile({ item }: { item: MetricTileState }) {
+function MetricTile({
+  item,
+  mode,
+  trend,
+  onModeChange,
+}: {
+  item: MetricTileState;
+  mode: TelemetryTileMode;
+  trend: TrendTileState | undefined;
+  onModeChange: (mode: TelemetryTileMode) => void;
+}) {
   return (
     <article className={`metric-tile status-${item.status}`}>
-      <span className="label">{item.label}</span>
-      <div className="metric-current">
-        <div className="gauge" aria-hidden="true">
-          <span style={{ '--gauge-value': metricPercent(item) } as CSSProperties} />
-        </div>
-        <strong>{formatValue(item.value, item.unit)}</strong>
-        {item.reference ? <small>{item.reference}</small> : null}
+      <div className="metric-tile-header">
+        <span className="label">{item.label}</span>
+        <SegmentedControl items={telemetryModeOptions} active={mode} onChange={onModeChange} />
       </div>
+      {mode === 'trend' && trend ? (
+        <div className="metric-trend">
+          <strong>{formatValue(trend.currentValue, trend.unit)}</strong>
+          <Sparkline points={trend.points} />
+        </div>
+      ) : (
+        <div className="metric-current">
+          <div className="gauge" aria-hidden="true">
+            <span style={{ '--gauge-value': metricPercent(item) } as CSSProperties} />
+          </div>
+          <strong>{formatValue(item.value, item.unit)}</strong>
+          {item.reference ? <small>{item.reference}</small> : null}
+        </div>
+      )}
     </article>
   );
 }
@@ -708,18 +728,6 @@ function MetricReadout({ item }: { item: MetricTileState }) {
       <span className="label">{item.label}</span>
       <strong>{formatValue(item.value, item.unit)}</strong>
       {item.reference ? <small>{item.reference}</small> : null}
-    </article>
-  );
-}
-
-function TrendTile({ item }: { item: TrendTileState }) {
-  return (
-    <article className="trend-tile">
-      <div>
-        <span className="label">{item.label}</span>
-        <strong>{formatValue(item.currentValue, item.unit)}</strong>
-      </div>
-      <Sparkline points={item.points} />
     </article>
   );
 }
@@ -801,30 +809,20 @@ function ProgressBar({ value }: { value: number }) {
 }
 
 function roomAssets(state: OperationsCockpitState) {
-  const cycle = batchCycleSummary(state);
   const lighting = controlByLabel(state.controls, 'Light');
   const climate = controlByLabel(state.controls, 'Climate');
   const irrigation = controlByLabel(state.controls, 'Irrigation');
   const canopy = capacityById(state.roomOverview.capacity, 'canopy-tables');
   const sensors = capacityById(state.roomOverview.capacity, 'sensor-points');
-  const exhaust = capacityById(state.roomOverview.capacity, 'exhaust-filters');
 
   return [
     {
-      id: 'batch',
-      icon: 'inventory_2',
-      name: `Batch ${state.roomOverview.batchId}`,
-      secondary: `Day ${cycle.currentDay} of ${cycle.cycleLengthDays}`,
-      status: titleCase(cycle.status),
-      statusLevel: cycle.status,
-    },
-    {
       id: 'canopy',
       icon: 'table_rows',
-      name: 'Canopy Tables',
-      secondary: canopy?.value ?? '0 / 0 Active',
-      status: titleCase(state.roomOverview.status),
-      statusLevel: state.roomOverview.status,
+      name: 'Canopy / Plants',
+      secondary: `${canopy?.active ?? 0} tables active`,
+      status: 'Monitored',
+      statusLevel: 'normal',
     },
     {
       id: 'lighting',
@@ -862,7 +860,7 @@ function roomAssets(state: OperationsCockpitState) {
       id: 'sensors',
       icon: 'sensors',
       name: 'Sensor Network',
-      secondary: `${sensors?.online ?? 0} Points Online`,
+      secondary: `${sensors?.online ?? 0} points online`,
       status: titleCase(state.roomOverview.status),
       statusLevel: state.roomOverview.status,
     },
@@ -870,7 +868,7 @@ function roomAssets(state: OperationsCockpitState) {
       id: 'exhaust',
       icon: 'filter_alt',
       name: 'Exhaust / Filtration',
-      secondary: `${exhaust?.online ?? 0} Filter Online`,
+      secondary: 'Maintenance due',
       status: 'Maintenance Due',
       statusLevel: 'warning',
     },
@@ -892,6 +890,20 @@ function inspectorHeader(state: OperationsCockpitState, selectedObject: Selected
     status: asset.status,
     statusLevel: asset.statusLevel,
   };
+}
+
+function batchContextFacts(state: OperationsCockpitState): [string, string][] {
+  const healthIndex = state.batchStatus.find((item) => item.id === 'batch-health-index');
+  const moistureBalance = state.batchStatus.find((item) => item.id === 'moisture-balance');
+  const yieldForecast = state.batchStatus.find((item) => item.id === 'yield-forecast');
+  const qualityEstimate = state.batchStatus.find((item) => item.id === 'quality-estimate');
+
+  return [
+    ['Health Index', healthIndex ? formatValue(healthIndex.value, healthIndex.unit) : 'Unavailable'],
+    ['Moisture Balance', moistureBalance ? formatValue(moistureBalance.value, moistureBalance.unit) : 'Unavailable'],
+    ['Yield Forecast', yieldForecast ? formatValue(yieldForecast.value, yieldForecast.unit) : 'Unavailable'],
+    ['Quality Estimate', qualityEstimate ? formatValue(qualityEstimate.value, qualityEstimate.unit) : 'Unavailable'],
+  ];
 }
 
 function batchCycleSummary(state: OperationsCockpitState) {
@@ -916,7 +928,7 @@ function formatInspectorValue(tuning?: ControlTileState['primaryTuning']) {
   return formatValue(tuning.value, tuning.unit);
 }
 
-function metricById(items: MetricTileState[], id: string) {
+function metricById(items: MetricTileState[], id: TelemetryKey) {
   return items.find((item) => item.id === id);
 }
 
@@ -926,7 +938,6 @@ function capacityById(items: RoomCapacityItemState[], id: string) {
 
 function lastEventForObject(entries: EventLogEntryState[], selectedObject: SelectedRoomObject, fallback: string) {
   const needles: Record<SelectedRoomObject, string[]> = {
-    batch: ['batch', 'cycle'],
     canopy: ['canopy', 'table'],
     lighting: ['light'],
     climate: ['climate', 'humidity', 'airflow'],
@@ -961,6 +972,22 @@ function metricPercent(item: MetricTileState) {
   return `${clamp(item.value, 0, 100)}%`;
 }
 
+function trendIdForMetric(id: TelemetryKey): TrendTileState['id'] {
+  return `${id}-trend`;
+}
+
+function isTelemetryKey(id: string): id is TelemetryKey {
+  return (
+    id === 'air-temperature'
+    || id === 'relative-humidity'
+    || id === 'co2-index'
+    || id === 'light-output'
+    || id === 'irrigation-index'
+    || id === 'airflow'
+    || id === 'nutrient-reservoir'
+  );
+}
+
 function slug(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
@@ -976,11 +1003,6 @@ function controlByLabel(items: ControlTileState[], label: string) {
 function controlMode(item?: ControlTileState) {
   if (!item) return 'Balanced / Auto';
   return `${titleCase(item.activeMode)} / ${titleCase(item.activeControl)}`;
-}
-
-function compactBatchLabel(label: string) {
-  if (label === 'Batch Health Index') return 'Health Index';
-  return label;
 }
 
 function navIcon(item: string) {
@@ -999,7 +1021,6 @@ function headerStatIcon(label: string) {
   const icons: Record<string, string> = {
     Day: 'calendar_today',
     Tick: 'timer',
-    Phase: 'cycle',
     'Overall Status': 'check_circle',
     'Facility Load': 'bolt',
     'Cost Today': 'payments',

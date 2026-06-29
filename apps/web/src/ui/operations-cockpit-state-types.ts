@@ -19,7 +19,6 @@ export type OperatingMode = 'Eco' | 'Balanced' | 'Push';
 export type ControlState = 'Auto' | 'Manual';
 export type SimSpeed = 1 | 2 | 4 | 8;
 export type SelectedRoomObject =
-  | 'batch'
   | 'canopy'
   | 'lighting'
   | 'climate'
@@ -27,7 +26,16 @@ export type SelectedRoomObject =
   | 'nutrient'
   | 'sensors'
   | 'exhaust';
-export type TelemetryPanelMode = 'current' | 'trends';
+export type TelemetryKey =
+  | 'air-temperature'
+  | 'relative-humidity'
+  | 'co2-index'
+  | 'light-output'
+  | 'irrigation-index'
+  | 'airflow'
+  | 'nutrient-reservoir';
+export type TelemetryTileMode = 'current' | 'trend';
+export type TelemetryViewModes = Record<TelemetryKey, TelemetryTileMode>;
 export type EventLogDrawerState = 'collapsed' | 'expanded';
 
 export interface SimulationRuntimeState {
@@ -111,7 +119,7 @@ export interface ControlTileState {
 }
 
 export interface TrendTileState {
-  id: string;
+  id: `${TelemetryKey}-trend`;
   label: string;
   unit: string;
   currentValue: string | number;

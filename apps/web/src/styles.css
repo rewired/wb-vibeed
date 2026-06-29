@@ -112,7 +112,7 @@ button {
 
 .header-stats {
   display: grid;
-  grid-template-columns: repeat(7, minmax(96px, 1fr));
+  grid-template-columns: repeat(6, minmax(104px, 1fr));
   min-width: 0;
 }
 
@@ -285,7 +285,7 @@ button {
 .workspace-grid {
   display: grid;
   grid-template-columns: 430px minmax(0, 1fr);
-  grid-template-rows: 92px 524px minmax(0, 1fr);
+  grid-template-rows: 154px 456px minmax(0, 1fr);
   gap: 8px;
   min-height: 0;
   padding-bottom: 42px;
@@ -340,15 +340,32 @@ button {
   grid-row: 3;
 }
 
-.room-context-strip {
+.room-context-grid {
   display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr 1fr;
-  gap: 1px;
+  grid-template-columns: minmax(0, 1.18fr) 240px minmax(0, 1.22fr);
+  gap: 8px;
   height: calc(100% - 34px);
   padding: 8px;
 }
 
-.room-context-strip div {
+.room-context-strip,
+.batch-context-facts {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.room-context-strip {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.batch-context-facts {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.room-context-strip div,
+.batch-context-facts div,
+.context-cycle {
   display: grid;
   align-content: center;
   gap: 5px;
@@ -358,7 +375,23 @@ button {
   background: rgba(5, 8, 9, 0.42);
 }
 
-.room-context-strip strong {
+.context-cycle {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.context-cycle div {
+  display: grid;
+  gap: 4px;
+}
+
+.context-cycle small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.room-context-strip strong,
+.batch-context-facts strong,
+.context-cycle strong {
   overflow: hidden;
   color: #e0e8e4;
   font-size: 15px;
@@ -394,6 +427,30 @@ button {
   gap: 6px;
   height: calc(100% - 34px);
   padding: 9px;
+  overflow-y: auto;
+  scrollbar-color: rgba(120, 185, 75, 0.45) rgba(5, 8, 9, 0.5);
+  scrollbar-width: thin;
+}
+
+.asset-list::-webkit-scrollbar,
+.inspector-shell > .system-inspector-grid::-webkit-scrollbar,
+.inspector-shell > .inspector-stack::-webkit-scrollbar,
+.event-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.asset-list::-webkit-scrollbar-track,
+.inspector-shell > .system-inspector-grid::-webkit-scrollbar-track,
+.inspector-shell > .inspector-stack::-webkit-scrollbar-track,
+.event-list::-webkit-scrollbar-track {
+  background: rgba(5, 8, 9, 0.5);
+}
+
+.asset-list::-webkit-scrollbar-thumb,
+.inspector-shell > .system-inspector-grid::-webkit-scrollbar-thumb,
+.inspector-shell > .inspector-stack::-webkit-scrollbar-thumb,
+.event-list::-webkit-scrollbar-thumb {
+  background: rgba(120, 185, 75, 0.42);
 }
 
 .asset-row {
@@ -497,12 +554,18 @@ button {
   text-transform: uppercase;
 }
 
-.batch-inspector,
 .system-inspector-grid,
 .inspector-stack {
   display: grid;
   gap: 10px;
   min-height: 0;
+}
+
+.inspector-shell > .system-inspector-grid,
+.inspector-shell > .inspector-stack {
+  overflow-y: auto;
+  scrollbar-color: rgba(120, 185, 75, 0.45) rgba(5, 8, 9, 0.5);
+  scrollbar-width: thin;
 }
 
 .system-inspector-grid {
@@ -512,65 +575,6 @@ button {
 
 .system-inspector-grid .last-event {
   grid-column: 1 / -1;
-}
-
-.cycle-card {
-  display: grid;
-  grid-template-columns: 150px minmax(0, 1fr);
-  align-items: center;
-  gap: 14px;
-  min-height: 96px;
-  padding: 12px;
-  border: 1px solid rgba(188, 205, 198, 0.12);
-  background: rgba(0, 0, 0, 0.18);
-}
-
-.cycle-card div {
-  display: grid;
-  gap: 6px;
-}
-
-.cycle-card strong {
-  color: #e0e8e4;
-  font-size: 34px;
-  line-height: 1;
-}
-
-.cycle-card small {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.batch-kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  min-height: 0;
-}
-
-.batch-kpi {
-  display: grid;
-  align-content: center;
-  gap: 6px;
-  min-width: 0;
-  min-height: 84px;
-  padding: 10px;
-  border: 1px solid rgba(188, 205, 198, 0.12);
-  background: rgba(0, 0, 0, 0.16);
-}
-
-.batch-kpi strong {
-  overflow: hidden;
-  color: var(--green);
-  font-size: 20px;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.batch-kpi small {
-  color: var(--muted);
-  font-size: 10px;
 }
 
 .inspector-controls,
@@ -754,13 +758,28 @@ button.active,
 .metric-tile {
   position: relative;
   display: grid;
-  grid-template-rows: 18px minmax(0, 1fr);
+  grid-template-rows: 24px minmax(0, 1fr);
   gap: 6px;
   min-width: 0;
   min-height: 0;
-  padding: 9px;
+  padding: 8px;
   border: 1px solid rgba(188, 205, 198, 0.12);
   background: rgba(0, 0, 0, 0.16);
+}
+
+.metric-tile-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 86px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.metric-tile-header .segmented-control button {
+  min-height: 18px;
+  padding: 2px 3px;
+  font-size: 9px;
+  letter-spacing: 0.04em;
 }
 
 .metric-tile .label {
@@ -774,16 +793,23 @@ button.active,
   display: grid;
   align-content: center;
   justify-items: center;
-  gap: 6px;
+  gap: 5px;
   min-height: 0;
   text-align: center;
 }
 
-.metric-tile strong,
-.trend-tile strong {
+.metric-trend {
+  display: grid;
+  grid-template-rows: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+  min-height: 0;
+}
+
+.metric-tile strong {
   overflow: hidden;
   color: #e0e8e4;
-  font-size: 18px;
+  font-size: 17px;
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -791,8 +817,8 @@ button.active,
 
 .gauge {
   position: relative;
-  width: 56px;
-  height: 28px;
+  width: 48px;
+  height: 24px;
   overflow: hidden;
 }
 
@@ -811,34 +837,9 @@ button.active,
   clip-path: polygon(0 0, var(--gauge-value) 0, var(--gauge-value) 100%, 0 100%);
 }
 
-.trend-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  height: calc(100% - 34px);
-  padding: 9px;
-}
-
-.trend-tile {
-  display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  padding: 10px;
-  border: 1px solid rgba(188, 205, 198, 0.12);
-  background: rgba(0, 0, 0, 0.16);
-}
-
-.trend-tile div {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-}
-
 .sparkline {
   width: 100%;
-  height: 52px;
+  height: 48px;
 }
 
 .sparkline-grid {
@@ -913,18 +914,6 @@ button.active,
   overflow: auto;
   scrollbar-color: rgba(120, 185, 75, 0.45) rgba(5, 8, 9, 0.5);
   scrollbar-width: thin;
-}
-
-.event-list::-webkit-scrollbar {
-  width: 8px;
-}
-
-.event-list::-webkit-scrollbar-track {
-  background: rgba(5, 8, 9, 0.5);
-}
-
-.event-list::-webkit-scrollbar-thumb {
-  background: rgba(120, 185, 75, 0.42);
 }
 
 .event-row {
