@@ -2,6 +2,7 @@ import blueprintData from './operations-cockpit-blueprint.json';
 import { rehydrateOperationsCockpit } from './operations-cockpit-rehydrate';
 import {
   advanceOperationsCockpitRuntime,
+  deriveEnvironmentDeviation,
   deriveGlobalDay,
   generateBatchReport,
   getModeTarget,
@@ -16,6 +17,7 @@ import type {
   OperationsCockpitControlSystem,
   OperationsCockpitRuntimeAction,
   OperationsCockpitRuntimeState,
+  RoomEnvironmentState,
   RuntimeWarningKey,
   StatusLevel,
   TelemetryKey,
@@ -39,6 +41,8 @@ export type RuntimeProfileScenarioSummary = {
   efficiency: number;
   finalStatus: StatusLevel;
   warningKeys: RuntimeWarningKey[];
+  finalEnvironment: RoomEnvironmentState;
+  environmentDeviation: number;
 };
 
 const blueprint = blueprintData as OperationsCockpitBlueprint;
@@ -125,9 +129,9 @@ export function runManualBadBalanceScenario(): RuntimeProfileScenarioSummary {
   return runProfileScenario({
     name: 'Manual Bad Balance',
     controls: {
-      light: { mode: 'Balanced', control: 'Manual', manualValue: 90 },
-      climate: { mode: 'Balanced', control: 'Manual', manualValue: 40 },
-      irrigation: { mode: 'Balanced', control: 'Manual', manualValue: 80 },
+      light: { mode: 'Balanced', control: 'Manual', manualValue: 100 },
+      climate: { mode: 'Balanced', control: 'Manual', manualValue: 0 },
+      irrigation: { mode: 'Balanced', control: 'Manual', manualValue: 100 },
     },
   });
 }
@@ -190,12 +194,17 @@ function checkManualControls(): void {
     assert(controlForSystem(clampedLow, system).manualValue === 0, `${system} manual value did not clamp low`);
     assert(controlForSystem(clampedHigh, system).manualValue === 100, `${system} manual value did not clamp high`);
 
-    const lowTelemetry = telemetryAfterManualTick(system, 10);
-    const highTelemetry = telemetryAfterManualTick(system, 90);
+    const lowTelemetry = telemetryAfterManualTicks(system, 10, 4);
+    const highTelemetry = telemetryAfterManualTicks(system, 90, 4);
+    const highTelemetryAfterOneTick = telemetryAfterManualTicks(system, 90, 1);
 
     assert(
       lowTelemetry !== highTelemetry,
-      `${system} manual value change did not affect derived telemetry after a tick`,
+      `${system} manual value change did not affect derived telemetry over multiple ticks`,
+    );
+    assert(
+      highTelemetryAfterOneTick !== 90,
+      `${system} telemetry snapped instantly to the manual target`,
     );
   }
 }
@@ -232,6 +241,10 @@ function checkManualProfileOutcomes(): void {
   assert(
     manualBadBalance.finalCore.stress > manualBalanced.finalCore.stress,
     'Bad manual balance did not increase stress over balanced manual values',
+  );
+  assert(
+    manualBadBalance.environmentDeviation > manualBalanced.environmentDeviation,
+    'Bad manual balance did not increase environment deviation',
   );
   assert(
     manualBadBalance.finalCore.outputPotential < manualBalanced.finalCore.outputPotential,
@@ -289,6 +302,7 @@ function checkStartNextBatch(): void {
   const dayBefore = deriveGlobalDay(runtime.simulation.tick, runtime.simulation.ticksPerDay);
   const controlsBefore = controlsSnapshot(runtime);
   const nutrientBefore = numericTelemetry(runtime, 'nutrient-reservoir');
+  const roomEnvironmentBefore = runtime.roomEnvironment;
   const next = dispatch(runtime, { type: 'start-next-batch' });
   const dayAfter = deriveGlobalDay(next.simulation.tick, next.simulation.ticksPerDay);
 
@@ -300,6 +314,7 @@ function checkStartNextBatch(): void {
   assert(next.cockpit.batchRuntime.lifecycleState === 'active', 'new batch is not active');
   assertEqual(next.cockpit.batchRuntime.batchCore, INITIAL_BATCH_CORE, 'new batch core values did not reset');
   assertEqual(controlsSnapshot(next), controlsBefore, 'room controls were reset when starting next batch');
+  assertEqual(next.roomEnvironment, roomEnvironmentBefore, 'room environment was reset when starting next batch');
   assert(
     numericTelemetry(next, 'nutrient-reservoir') <= nutrientBefore,
     'nutrient reservoir was refilled when starting next batch',
@@ -408,6 +423,8 @@ function profileScenarioSummary(
     efficiency: report.efficiency,
     finalStatus: report.finalStatus,
     warningKeys: runtime.cockpit.warningConditions.map((warning) => warning.key),
+    finalEnvironment: runtime.roomEnvironment,
+    environmentDeviation: deriveEnvironmentDeviation(runtime.roomEnvironment),
   };
 }
 
@@ -453,12 +470,16 @@ function tickUntilWarning(
   throw new Error(`${warningKey} warning did not appear within 500 ticks`);
 }
 
-function telemetryAfterManualTick(system: OperationsCockpitControlSystem, manualValue: number): number {
+function telemetryAfterManualTicks(
+  system: OperationsCockpitControlSystem,
+  manualValue: number,
+  tickCount: number,
+): number {
   let state = createRuntime();
   state = dispatch(state, { type: 'set-control-state', system, control: 'Manual' });
   state = dispatch(state, { type: 'set-manual-value', system, value: manualValue });
   state = dispatch(state, { type: 'set-running', isRunning: true });
-  state = dispatch(state, { type: 'tick' });
+  state = tick(state, tickCount);
 
   return numericTelemetry(state, CONTROL_TELEMETRY[system]);
 }
@@ -506,6 +527,7 @@ function rehydrationSnapshot(state: OperationsCockpitRuntimeState) {
       reference: item.reference,
       status: item.status,
     })),
+    roomEnvironment: state.roomEnvironment,
     baseline: state.baseline,
   };
 }
@@ -525,6 +547,7 @@ function runtimeSnapshot(state: OperationsCockpitRuntimeState) {
     warningConditions: state.cockpit.warningConditions,
     energyCost: state.cockpit.energyCost,
     utilityStatus: state.cockpit.utilityStatus,
+    roomEnvironment: state.roomEnvironment,
     baseline: state.baseline,
   };
 }

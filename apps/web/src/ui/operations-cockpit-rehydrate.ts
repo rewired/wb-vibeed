@@ -59,6 +59,9 @@ export function rehydrateOperationsCockpit(
         startTick: blueprint.batch.startTick,
       },
     },
+    roomEnvironment: {
+      ...blueprint.roomEnvironment,
+    },
     cockpit: {
       header: {
         title: 'Room Cockpit',

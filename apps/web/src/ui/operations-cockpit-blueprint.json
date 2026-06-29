@@ -98,6 +98,15 @@
       "status": "normal"
     }
   },
+  "roomEnvironment": {
+    "temperatureIndex": 57.5,
+    "humidityIndex": 58,
+    "co2Index": 58.3,
+    "lightIndex": 72,
+    "irrigationIndex": 46,
+    "airflowIndex": 68,
+    "nutrientReservoir": 79
+  },
   "controls": {
     "light": {
       "mode": "Balanced",

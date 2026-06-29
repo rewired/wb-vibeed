@@ -1,4 +1,5 @@
 import type {
+  ActuatorTargetState,
   BatchCoreState,
   BatchLifecycleState,
   BatchOutcomeAccumulators,
@@ -13,6 +14,7 @@ import type {
   OperationsCockpitRuntimeAction,
   OperationsCockpitRuntimeState,
   ProgressTileState,
+  RoomEnvironmentState,
   RuntimeWarningKey,
   StatusLevel,
   TrendTileState,
@@ -23,6 +25,16 @@ import type {
 const MAX_EVENT_LOG_ENTRIES = 20;
 const COST_PER_KWH = 0.34;
 const NUTRIENT_REVIEW_THRESHOLD = 20;
+const BASE_YIELD_UNITS = 480;
+const IDEAL_ENVIRONMENT_INDEX = 65;
+const ENVIRONMENT_RATES = {
+  lightIndex: 0.35,
+  airflowIndex: 0.22,
+  irrigationIndex: 0.18,
+  temperatureIndex: 0.08,
+  humidityIndex: 0.07,
+  co2Index: 0.05,
+} as const satisfies Record<Exclude<keyof RoomEnvironmentState, 'nutrientReservoir'>, number>;
 const INITIAL_BATCH_CORE: BatchCoreState = {
   maturity: 0,
   stress: 10,
@@ -43,7 +55,7 @@ export function advanceOperationsCockpitRuntime(
         ...state.simulation,
         tick: state.simulation.tick + 1,
       },
-    }, { advanceBatchCore: true, accumulateBatchTick: true });
+    }, { advanceBatchCore: true, advanceRoomEnvironment: true, accumulateBatchTick: true });
   }
 
   if (action.type === 'complete-batch') {
@@ -166,9 +178,9 @@ export function generateBatchReport(state: OperationsCockpitRuntimeState): Batch
   const completedDay = deriveGlobalDay(state.simulation.tick, state.simulation.ticksPerDay);
   const batchDuration = deriveBatchElapsedTicks(state.simulation.tick, state.baseline.batch.startTick);
   const warningCount = state.cockpit.warningConditions.length;
-  const finalStatus = deriveRoomStatus(state.cockpit.warningConditions, batchCore);
-  const qualityEstimate = clamp(Math.round(batchCore.vigor * 0.72 + (100 - batchCore.stress) * 0.28), 0, 100);
-  const yieldEstimate = Math.round(batchCore.outputPotential * 12);
+  const finalStatus = deriveRoomStatus(state.cockpit.warningConditions, batchCore, state.roomEnvironment);
+  const qualityEstimate = clamp(Math.round(batchCore.vigor * 0.7 + (100 - batchCore.stress) * 0.3), 0, 100);
+  const yieldEstimate = Math.round(BASE_YIELD_UNITS * (0.5 + batchCore.outputPotential / 150));
   const efficiency = deriveEfficiencyScore(batchCore.outputPotential, accumulators.operatingCost);
 
   return {
@@ -292,23 +304,33 @@ function applyManualValueChange(
 
 function deriveOperationsCockpitRuntime(
   state: OperationsCockpitRuntimeState,
-  options: { emitWarningEvents?: boolean; advanceBatchCore?: boolean; accumulateBatchTick?: boolean } = {},
+  options: {
+    emitWarningEvents?: boolean;
+    advanceBatchCore?: boolean;
+    advanceRoomEnvironment?: boolean;
+    accumulateBatchTick?: boolean;
+  } = {},
 ): OperationsCockpitRuntimeState {
   const globalDay = deriveGlobalDay(state.simulation.tick, state.simulation.ticksPerDay);
   const batchDay = deriveBatchDay(state.simulation.tick, state.baseline.batch.startTick, state.simulation.ticksPerDay);
   const controls = deriveControls(state.cockpit.controls);
+  const actuatorTargets = deriveActuatorTargets(controls);
+  const roomEnvironment = options.advanceRoomEnvironment
+    ? advanceRoomEnvironment(state.roomEnvironment, actuatorTargets, state.simulation.tick)
+    : state.roomEnvironment;
+  const environmentDeviation = deriveEnvironmentDeviation(roomEnvironment);
   const previousLifecycleState = state.cockpit.batchRuntime.lifecycleState;
   const batchCore = options.advanceBatchCore && shouldUpdateBatchAccumulators(previousLifecycleState)
-    ? advanceBatchCore(state.cockpit.batchRuntime.batchCore, controls)
+    ? advanceBatchCore(state.cockpit.batchRuntime.batchCore, roomEnvironment)
     : state.cockpit.batchRuntime.batchCore;
   const lifecycleState = deriveBatchLifecycleState(previousLifecycleState, batchCore.maturity);
   const readyForReview = lifecycleState === 'ready';
   const phase = lifecycleState === 'completed' ? 'Completed' : deriveOperationalPhase(batchCore.maturity);
-  const metrics = deriveTelemetry(state, controls);
-  const warnings = deriveWarnings(state, metrics, batchCore, readyForReview);
+  const metrics = deriveTelemetry(state, roomEnvironment, actuatorTargets);
+  const warnings = deriveWarnings(roomEnvironment, environmentDeviation, batchCore, readyForReview);
   const warningKeys = warnings.map((warning) => warning.key);
-  const roomStatus = deriveRoomStatus(warnings, batchCore);
-  const powerNow = derivePowerNow(state, controls);
+  const roomStatus = deriveRoomStatus(warnings, batchCore, roomEnvironment);
+  const powerNow = derivePowerNow(state, actuatorTargets, environmentDeviation);
   const dailyEnergy = round(powerNow * 24, 1);
   const dailyCost = round(dailyEnergy * COST_PER_KWH, 2);
   const accumulators = options.accumulateBatchTick && shouldUpdateBatchAccumulators(lifecycleState)
@@ -325,7 +347,7 @@ function deriveOperationsCockpitRuntime(
     batchDay,
     cycleLengthDays: state.cockpit.batchRuntime.cycleLengthDays,
     startTick: state.baseline.batch.startTick,
-    cycleProgress: round(batchCore.maturity),
+    cycleProgress: deriveCycleProgress(batchCore.maturity),
     phase,
     lifecycleState,
     readyForReview,
@@ -343,6 +365,7 @@ function deriveOperationsCockpitRuntime(
 
   return {
     ...state,
+    roomEnvironment,
     activeWarnings: warningKeys,
     cockpit: {
       ...state.cockpit,
@@ -376,64 +399,90 @@ function deriveOperationsCockpitRuntime(
   };
 }
 
-function advanceBatchCore(batchCore: BatchCoreState, controls: ControlTileState[]): BatchCoreState {
-  const lightTarget = effectiveTargetByLabel(controls, 'Light');
-  const climateTarget = effectiveTargetByLabel(controls, 'Climate');
-  const irrigationTarget = effectiveTargetByLabel(controls, 'Irrigation');
-  const operatingPressure = (lightTarget + climateTarget + irrigationTarget) / 3;
-  const balancePenalty =
-    imbalanceGap(lightTarget, climateTarget) * 0.04
-    + imbalanceGap(irrigationTarget, climateTarget) * 0.035
-    + imbalanceGap(lightTarget, irrigationTarget) * 0.015;
-  const pushPressure = Math.max(0, operatingPressure - 72) * 0.05;
-  const lowPressureStress = Math.max(0, 45 - operatingPressure) * 0.012;
-  const stressRelief = Math.max(0, 70 - operatingPressure) * 0.01;
+export function deriveActuatorTargets(controls: ControlTileState[]): ActuatorTargetState {
+  return {
+    light: effectiveTargetByLabel(controls, 'Light'),
+    climate: effectiveTargetByLabel(controls, 'Climate'),
+    irrigation: effectiveTargetByLabel(controls, 'Irrigation'),
+  };
+}
+
+function deriveEnvironmentTargets(targets: ActuatorTargetState, tick: number): RoomEnvironmentState {
+  return {
+    lightIndex: targets.light,
+    airflowIndex: targets.climate,
+    irrigationIndex: targets.irrigation,
+    temperatureIndex: 50 + targets.light * 0.25 - targets.climate * 0.18,
+    humidityIndex: 45 + targets.irrigation * 0.22 - targets.climate * 0.12,
+    co2Index: 60 + wave(tick, 4, 19),
+    nutrientReservoir: 100,
+  };
+}
+
+function advanceRoomEnvironment(
+  current: RoomEnvironmentState,
+  targets: ActuatorTargetState,
+  tick: number,
+): RoomEnvironmentState {
+  const targetEnvironment = deriveEnvironmentTargets(targets, tick);
+  const nutrientDrain = 0.025 + targets.irrigation * 0.001;
+
+  return {
+    temperatureIndex: clamp(approach(current.temperatureIndex, targetEnvironment.temperatureIndex, ENVIRONMENT_RATES.temperatureIndex), 0, 100),
+    humidityIndex: clamp(approach(current.humidityIndex, targetEnvironment.humidityIndex, ENVIRONMENT_RATES.humidityIndex), 0, 100),
+    co2Index: clamp(approach(current.co2Index, targetEnvironment.co2Index, ENVIRONMENT_RATES.co2Index), 0, 100),
+    lightIndex: clamp(approach(current.lightIndex, targetEnvironment.lightIndex, ENVIRONMENT_RATES.lightIndex), 0, 100),
+    irrigationIndex: clamp(approach(current.irrigationIndex, targetEnvironment.irrigationIndex, ENVIRONMENT_RATES.irrigationIndex), 0, 100),
+    airflowIndex: clamp(approach(current.airflowIndex, targetEnvironment.airflowIndex, ENVIRONMENT_RATES.airflowIndex), 0, 100),
+    nutrientReservoir: clamp(current.nutrientReservoir - nutrientDrain, 0, 100),
+  };
+}
+
+export function deriveEnvironmentDeviation(environment: RoomEnvironmentState): number {
+  return (
+    distanceFromIdeal(environment.temperatureIndex, IDEAL_ENVIRONMENT_INDEX) * 0.20
+    + distanceFromIdeal(environment.humidityIndex, IDEAL_ENVIRONMENT_INDEX) * 0.18
+    + distanceFromIdeal(environment.lightIndex, IDEAL_ENVIRONMENT_INDEX) * 0.20
+    + distanceFromIdeal(environment.irrigationIndex, IDEAL_ENVIRONMENT_INDEX) * 0.18
+    + distanceFromIdeal(environment.airflowIndex, IDEAL_ENVIRONMENT_INDEX) * 0.14
+    + distanceFromIdeal(environment.co2Index, IDEAL_ENVIRONMENT_INDEX) * 0.10
+  );
+}
+
+function advanceBatchCore(batchCore: BatchCoreState, roomEnvironment: RoomEnvironmentState): BatchCoreState {
+  const environmentDeviation = deriveEnvironmentDeviation(roomEnvironment);
+  const stability = clamp(100 - environmentDeviation, 0, 100);
+  const operatingPressure = (
+    roomEnvironment.lightIndex
+    + roomEnvironment.airflowIndex
+    + roomEnvironment.irrigationIndex
+  ) / 3;
   const stress = clamp(
-    batchCore.stress + pushPressure + lowPressureStress + balancePenalty - stressRelief - 0.16,
+    batchCore.stress
+      + environmentDeviation * 0.025
+      + Math.max(0, operatingPressure - 75) * 0.02
+      - 0.16,
     0,
     100,
   );
-  const balanceBonus = Math.max(0, 6 - balancePenalty) * 0.03;
-  const pressureVigorPenalty = Math.max(0, operatingPressure - 76) * 0.055;
-  const lowPressureVigorPenalty = Math.max(0, 54 - operatingPressure) * 0.016;
-  const stressVigorPenalty = Math.max(0, stress - 55) * 0.02;
   const vigor = clamp(
     batchCore.vigor
-      + (66 - stress) * 0.014
-      + balanceBonus
-      - pressureVigorPenalty
-      - lowPressureVigorPenalty
-      - stressVigorPenalty,
+      + (stability - 60) * 0.02
+      - stress * 0.006,
     0,
     100,
   );
-  const outputCeiling = clamp(
-    55
-      + operatingPressure * 0.58
-      + (vigor - 70) * 0.08
-      - balancePenalty * 0.8
-      - Math.max(0, stress - 60) * 0.3,
-    35,
-    100,
-  );
-  const outputGain =
-    vigor * 0.0048
-    + Math.max(0, operatingPressure - 42) * 0.0095
-    - Math.max(0, stress - 42) * 0.006
-    - Math.max(0, stress - 72) * 0.018
-    - balancePenalty * 0.04;
-  const outputRoomFactor = clamp((outputCeiling - batchCore.outputPotential) / 70, 0, 1);
-  const outputOverCeilingDecay = Math.max(0, batchCore.outputPotential - outputCeiling) * 0.03;
   const outputPotential = clamp(
     batchCore.outputPotential
-      + outputGain * outputRoomFactor
-      - outputOverCeilingDecay,
+      + vigor * 0.01
+      + Math.max(0, operatingPressure - 55) * 0.01
+      - stress * 0.008,
     0,
     100,
   );
 
   return {
-    maturity: clamp(batchCore.maturity + 0.25 + operatingPressure * 0.0048 - stress * 0.00055, 0, 100),
+    maturity: clamp(batchCore.maturity + 0.22 + operatingPressure * 0.004, 0, 100),
     stress,
     vigor,
     outputPotential,
@@ -539,33 +588,19 @@ function accumulateBatchTick({
   };
 }
 
-function deriveTelemetry(state: OperationsCockpitRuntimeState, controls: ControlTileState[]): MetricTileState[] {
-  const tick = elapsedTick(state);
-  const lightTarget = effectiveTargetByLabel(controls, 'Light');
-  const climateTarget = effectiveTargetByLabel(controls, 'Climate');
-  const irrigationTarget = effectiveTargetByLabel(controls, 'Irrigation');
-  const baseline = state.baseline.telemetry;
-
+function deriveTelemetry(
+  state: OperationsCockpitRuntimeState,
+  roomEnvironment: RoomEnvironmentState,
+  actuatorTargets: ActuatorTargetState,
+): MetricTileState[] {
   const values: Record<string, number> = {
-    'air-temperature': round(clamp(
-      baseline.airTemperature + (lightTarget - 65) * 0.025 - (climateTarget - 65) * 0.018 + wave(tick, 0.35, 16),
-      21.5,
-      29.5,
-    ), 1),
-    'relative-humidity': round(clamp(
-      baseline.relativeHumidity + (irrigationTarget - 65) * 0.08 - (climateTarget - 65) * 0.07 + wave(tick, 1.4, 20, 4),
-      42,
-      72,
-    )),
-    'co2-index': round(clamp(baseline.co2Index + wave(tick, 20, 17, 8), 1050, 1230)),
-    'light-output': round(lightTarget),
-    'irrigation-index': round(irrigationTarget),
-    airflow: round(climateTarget),
-    'nutrient-reservoir': round(clamp(
-      baseline.nutrientReservoir - elapsedTick(state) * (0.06 + irrigationTarget * 0.002),
-      0,
-      100,
-    )),
+    'air-temperature': round(20 + roomEnvironment.temperatureIndex * 0.08, 1),
+    'relative-humidity': round(roomEnvironment.humidityIndex),
+    'co2-index': round(800 + roomEnvironment.co2Index * 6),
+    'light-output': round(roomEnvironment.lightIndex),
+    'irrigation-index': round(roomEnvironment.irrigationIndex),
+    airflow: round(roomEnvironment.airflowIndex),
+    'nutrient-reservoir': round(roomEnvironment.nutrientReservoir),
   };
 
   return state.cockpit.environmentalTelemetry.map((item) => {
@@ -579,9 +614,12 @@ function deriveTelemetry(state: OperationsCockpitRuntimeState, controls: Control
       status,
     };
 
-    if (item.id === 'light-output') return { ...nextItem, reference: `Effective ${lightTarget} %` };
-    if (item.id === 'airflow') return { ...nextItem, reference: `Effective ${climateTarget} %` };
-    if (item.id === 'irrigation-index') return { ...nextItem, reference: `Effective ${irrigationTarget} %` };
+    if (item.id === 'air-temperature') return { ...nextItem, reference: 'Abstract room index' };
+    if (item.id === 'relative-humidity') return { ...nextItem, reference: 'Abstract room index' };
+    if (item.id === 'co2-index') return { ...nextItem, reference: 'Abstract CO2 index' };
+    if (item.id === 'light-output') return { ...nextItem, reference: `Target ${actuatorTargets.light} %` };
+    if (item.id === 'airflow') return { ...nextItem, reference: `Target ${actuatorTargets.climate} %` };
+    if (item.id === 'irrigation-index') return { ...nextItem, reference: `Target ${actuatorTargets.irrigation} %` };
 
     return item.id === 'nutrient-reservoir'
       ? { ...nextItem, reference: `Low Threshold ${NUTRIENT_REVIEW_THRESHOLD} %` }
@@ -590,12 +628,11 @@ function deriveTelemetry(state: OperationsCockpitRuntimeState, controls: Control
 }
 
 function deriveWarnings(
-  state: OperationsCockpitRuntimeState,
-  metrics: MetricTileState[],
+  roomEnvironment: RoomEnvironmentState,
+  environmentDeviation: number,
   batchCore: BatchCoreState,
   readyForReview: boolean,
 ): WarningConditionState[] {
-  const nutrientReservoir = numericMetric(metrics, 'Nutrient Reservoir', state.baseline.telemetry.nutrientReservoir);
   const warnings: WarningConditionState[] = [];
 
   if (batchCore.stress >= 70) {
@@ -618,7 +655,17 @@ function deriveWarnings(
     });
   }
 
-  if (nutrientReservoir <= NUTRIENT_REVIEW_THRESHOLD) {
+  if (environmentDeviation >= 35) {
+    warnings.push({
+      key: 'environment-drift',
+      severity: 'warning',
+      title: 'Environment drift.',
+      detail: `Room environment deviation is ${round(environmentDeviation)} / 100.`,
+      object: 'sensors',
+    });
+  }
+
+  if (roomEnvironment.nutrientReservoir <= NUTRIENT_REVIEW_THRESHOLD) {
     warnings.push({
       key: 'nutrient-reservoir-low',
       severity: 'warning',
@@ -641,8 +688,12 @@ function deriveWarnings(
   return warnings;
 }
 
-function deriveRoomStatus(warnings: WarningConditionState[], batchCore: BatchCoreState): StatusLevel {
-  if (batchCore.stress >= 90 || batchCore.vigor <= 20) return 'critical';
+function deriveRoomStatus(
+  warnings: WarningConditionState[],
+  batchCore: BatchCoreState,
+  roomEnvironment: RoomEnvironmentState,
+): StatusLevel {
+  if (batchCore.stress >= 90 || batchCore.vigor <= 20 || roomEnvironment.nutrientReservoir <= 5) return 'critical';
   return warnings.length > 0 ? 'warning' : 'normal';
 }
 
@@ -666,10 +717,18 @@ function deriveControls(controls: ControlTileState[]) {
   });
 }
 
-function derivePowerNow(state: OperationsCockpitRuntimeState, controls: ControlTileState[]) {
-  const targetLoad = controls.reduce((total, control) => total + control.effectiveTarget, 0) / 100;
+function derivePowerNow(
+  state: OperationsCockpitRuntimeState,
+  actuatorTargets: ActuatorTargetState,
+  environmentDeviation: number,
+) {
+  const targetLoad =
+    actuatorTargets.light * 0.08
+    + actuatorTargets.climate * 0.07
+    + actuatorTargets.irrigation * 0.03;
+  const environmentLoadPenalty = Math.max(0, environmentDeviation - 20) * 0.03;
 
-  return round(clamp(state.baseline.energy.powerNow * 0.38 + targetLoad * 5.9 + wave(elapsedTick(state), 0.25, 15), 8, 28), 1);
+  return round(clamp(state.baseline.energy.powerNow + targetLoad + environmentLoadPenalty, 0, 40), 1);
 }
 
 function deriveEnergyCost(
@@ -846,14 +905,19 @@ function effectiveTargetByLabel(items: ControlTileState[], label: string) {
   return items.find((item) => item.label === label)?.effectiveTarget ?? 65;
 }
 
-function imbalanceGap(firstTarget: number, secondTarget: number) {
-  return Math.max(0, Math.abs(firstTarget - secondTarget) - 5);
-}
-
 function effectiveLabel(label: string) {
   if (label === 'Light') return 'Effective Output';
   if (label === 'Climate') return 'Effective Climate Effort';
   return 'Effective Irrigation Index';
+}
+
+function approach(current: number, target: number, rate: number): number {
+  const delta = target - current;
+  return current + delta * rate;
+}
+
+function distanceFromIdeal(value: number, ideal: number): number {
+  return Math.abs(value - ideal);
 }
 
 function wave(tick: number, amplitude: number, period: number, phase = 0) {
@@ -893,10 +957,6 @@ export function deriveOperationalPhase(maturity: number): OperationalPhase {
   return 'Harvest Ready';
 }
 
-function elapsedTick(state: OperationsCockpitRuntimeState) {
-  return Math.max(0, state.simulation.tick - state.simulation.initialTick);
-}
-
 function clockFromTick(tick: number, ticksPerDay: number) {
   const minutesPerTick = Math.floor((24 * 60) / ticksPerDay);
   const minutes = (tick % ticksPerDay) * minutesPerTick;
@@ -923,7 +983,7 @@ function batchReportSummary(batchCore: BatchCoreState, efficiency: number, warni
 
 function deriveEfficiencyScore(outputPotential: number, operatingCost: number) {
   if (operatingCost <= 0) return 100;
-  return clamp(Math.round((outputPotential / Math.max(1, operatingCost / 8)) * 10), 0, 100);
+  return clamp(Math.round((outputPotential / Math.max(1, operatingCost)) * 1000), 0, 100);
 }
 
 function titleCase(value: string) {

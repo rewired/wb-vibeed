@@ -22,6 +22,7 @@ export type OperationalPhase = 'Seedling' | 'Vegetative' | 'Flowering' | 'Late F
 export type BatchLifecycleState = 'active' | 'ready' | 'completed';
 export type RuntimeWarningKey =
   | 'cycle-ready'
+  | 'environment-drift'
   | 'high-stress'
   | 'low-vigor'
   | 'nutrient-reservoir-low';
@@ -93,6 +94,22 @@ export interface BatchCoreState {
   stress: number;
   vigor: number;
   outputPotential: number;
+}
+
+export interface ActuatorTargetState {
+  light: number;
+  climate: number;
+  irrigation: number;
+}
+
+export interface RoomEnvironmentState {
+  temperatureIndex: number;
+  humidityIndex: number;
+  co2Index: number;
+  lightIndex: number;
+  irrigationIndex: number;
+  airflowIndex: number;
+  nutrientReservoir: number;
 }
 
 export interface HeaderStat {
@@ -261,6 +278,7 @@ export interface OperationsCockpitRuntimeState {
   simulation: SimulationRuntimeState;
   cockpit: OperationsCockpitState;
   baseline: OperationsCockpitRuntimeBaseline;
+  roomEnvironment: RoomEnvironmentState;
   activeWarnings: RuntimeWarningKey[];
   completedBatchReports: BatchReport[];
 }
@@ -328,6 +346,7 @@ export interface OperationsCockpitBlueprint {
     airflow: BlueprintMetric;
     nutrientReservoir: BlueprintMetric;
   };
+  roomEnvironment: RoomEnvironmentState;
   controls: CockpitControlState;
   batchCore: BatchCoreState;
   energy: {
