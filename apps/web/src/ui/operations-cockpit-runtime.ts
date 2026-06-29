@@ -94,7 +94,9 @@ export function initializeOperationsCockpitRuntime(state: OperationsCockpitRunti
 }
 
 export function generateBatchReport(state: OperationsCockpitRuntimeState): BatchReport {
-  const runtime = state.cockpit.batchRuntime;
+  const cycleLengthDays = state.baseline.batch.cycleLengthDays;
+  const actualDays = deriveBatchDay(state.simulation.tick, state.baseline.batch.startTick, state.simulation.ticksPerDay);
+  const completedDay = deriveGlobalDay(state.simulation.tick, state.simulation.ticksPerDay);
   const warningCount = state.cockpit.warningConditions.length;
   const finalStatus = warningCount > 0 ? 'warning' : state.cockpit.roomOverview.status;
   const dailyEnergy = numericMetric(state.cockpit.energyCost, 'Daily Energy', 0);
@@ -104,20 +106,20 @@ export function generateBatchReport(state: OperationsCockpitRuntimeState): Batch
     batchId: state.cockpit.roomOverview.batchId,
     roomId: state.cockpit.roomOverview.roomId,
     zoneId: state.cockpit.roomOverview.zoneId,
-    completedDay: runtime.currentDay,
+    completedDay,
     completedTick: state.simulation.tick,
-    cycleLengthDays: runtime.cycleLengthDays,
-    actualDays: runtime.currentDay,
+    cycleLengthDays,
+    actualDays,
     finalHealthIndex: numericMetric(state.cockpit.batchStatus, 'Batch Health Index', 0),
     finalMoistureBalance: numericMetric(state.cockpit.batchStatus, 'Moisture Balance', 0),
     finalQualityEstimate: numericMetric(state.cockpit.batchStatus, 'Quality Estimate', 0),
     finalYieldEstimate: numericMetric(state.cockpit.batchStatus, 'Yield Forecast', 0),
-    totalEnergyKwh: round(dailyEnergy * runtime.currentDay, 1),
-    totalCost: round(dailyCost * runtime.currentDay, 2),
+    totalEnergyKwh: round(dailyEnergy * actualDays, 1),
+    totalCost: round(dailyCost * actualDays, 2),
     efficiencyScore: numericMetric(state.cockpit.energyCost, 'Efficiency', 0),
     warningCount,
     finalStatus,
-    summary: batchReportSummary(runtime.currentDay, runtime.cycleLengthDays, warningCount),
+    summary: batchReportSummary(actualDays, cycleLengthDays, warningCount),
   };
 }
 
@@ -157,14 +159,17 @@ function deriveOperationsCockpitRuntime(
   state: OperationsCockpitRuntimeState,
   options: { emitWarningEvents?: boolean } = {},
 ): OperationsCockpitRuntimeState {
-  const day = dayFromTick(state.simulation.tick, state.simulation.ticksPerDay);
-  const cycleProgress = cycleProgressFromDay(day, state.baseline.batch.cycleLengthDays);
+  const globalDay = deriveGlobalDay(state.simulation.tick, state.simulation.ticksPerDay);
+  const batchDay = deriveBatchDay(state.simulation.tick, state.baseline.batch.startTick, state.simulation.ticksPerDay);
+  const cycleLengthDays = state.baseline.batch.cycleLengthDays;
+  const cycleProgress = deriveCycleProgress(batchDay, cycleLengthDays);
   const lifecycleState = deriveBatchLifecycleState(state.cockpit.batchRuntime.lifecycleState, cycleProgress);
-  const phase = lifecycleState === 'completed' ? 'Completed' : phaseFromCycleProgress(cycleProgress);
+  const phase = lifecycleState === 'completed' ? 'Completed' : deriveOperationalPhase(cycleProgress);
   const readyForReview = lifecycleState === 'ready';
   const batchRuntime = {
-    currentDay: day,
-    cycleLengthDays: state.baseline.batch.cycleLengthDays,
+    batchDay,
+    cycleLengthDays,
+    startTick: state.baseline.batch.startTick,
     cycleProgress,
     phase,
     lifecycleState,
@@ -173,7 +178,7 @@ function deriveOperationsCockpitRuntime(
   };
   const controls = deriveControls(state.cockpit.controls);
   const metrics = deriveTelemetry({ ...state, cockpit: { ...state.cockpit, controls } });
-  const warnings = deriveWarnings(state, metrics, cycleProgress, readyForReview);
+  const warnings = deriveWarnings(state, metrics, batchDay, cycleProgress, readyForReview);
   const warningKeys = warnings.map((warning) => warning.key);
   const roomStatus = deriveRoomStatus(state.cockpit.roomOverview.status, warnings);
   const powerNow = derivePowerNow({ ...state, cockpit: { ...state.cockpit, controls } });
@@ -195,7 +200,7 @@ function deriveOperationsCockpitRuntime(
       header: {
         ...state.cockpit.header,
         stats: state.cockpit.header.stats.map((stat) => {
-          if (stat.label === 'Day') return { ...stat, value: day };
+          if (stat.label === 'Day') return { ...stat, value: globalDay };
           if (stat.label === 'Tick') return { ...stat, value: state.simulation.tick };
           if (stat.label === 'Overall Status') return { ...stat, value: titleCase(roomStatus), status: roomStatus };
           if (stat.label === 'Facility Load') return { ...stat, value: powerNow };
@@ -217,10 +222,10 @@ function deriveOperationsCockpitRuntime(
           ...item,
           value: cycleProgress,
           secondary: lifecycleState === 'completed'
-            ? `Day ${day} of ${state.baseline.batch.cycleLengthDays} / Completed`
+            ? `Batch Day ${batchDay} of ${cycleLengthDays} / Completed`
             : readyForReview
-            ? `Day ${day} of ${state.baseline.batch.cycleLengthDays} / Harvest Ready`
-            : `Day ${day} of ${state.baseline.batch.cycleLengthDays}`,
+            ? `Batch Day ${batchDay} of ${cycleLengthDays} / Harvest Ready`
+            : `Batch Day ${batchDay} of ${cycleLengthDays}`,
           status: readyForReview ? 'warning' : roomStatus,
         };
       }),
@@ -277,15 +282,15 @@ function deriveTelemetry(state: OperationsCockpitRuntimeState): MetricTileState[
 function deriveWarnings(
   state: OperationsCockpitRuntimeState,
   metrics: MetricTileState[],
+  batchDay: number,
   cycleProgress: number,
   readyForReview: boolean,
 ): WarningConditionState[] {
-  const day = dayFromTick(state.simulation.tick, state.simulation.ticksPerDay);
   const cycleLengthDays = state.baseline.batch.cycleLengthDays;
   const nutrientReservoir = numericMetric(metrics, 'Nutrient Reservoir', state.baseline.telemetry.nutrientReservoir);
   const warnings: WarningConditionState[] = [];
 
-  if (day >= Math.max(1, cycleLengthDays - 15)) {
+  if (batchDay >= Math.max(1, cycleLengthDays - 15)) {
     warnings.push({
       key: 'filter-maintenance-due',
       severity: 'warning',
@@ -320,7 +325,7 @@ function deriveWarnings(
       key: 'cycle-ready',
       severity: 'warning',
       title: 'Batch harvest-ready.',
-      detail: 'Cycle progress reached 100%.',
+      detail: `Batch day ${batchDay} of ${cycleLengthDays}.`,
       object: 'canopy',
     });
   }
@@ -422,7 +427,7 @@ function controlChangeEvent(
   target: 'mode' | 'control',
   value: string,
 ): EventLogEntryState {
-  const day = dayFromTick(state.simulation.tick, state.simulation.ticksPerDay);
+  const day = deriveGlobalDay(state.simulation.tick, state.simulation.ticksPerDay);
   const title = `${systemLabel} ${target} changed to ${value}.`;
 
   return {
@@ -437,7 +442,7 @@ function controlChangeEvent(
 }
 
 function warningEvent(state: OperationsCockpitRuntimeState, warning: WarningConditionState): EventLogEntryState {
-  const day = dayFromTick(state.simulation.tick, state.simulation.ticksPerDay);
+  const day = deriveGlobalDay(state.simulation.tick, state.simulation.ticksPerDay);
 
   return {
     id: `warning-${state.simulation.tick}-${warning.key}`,
@@ -451,7 +456,8 @@ function warningEvent(state: OperationsCockpitRuntimeState, warning: WarningCond
 }
 
 function batchCompletedEvent(state: OperationsCockpitRuntimeState): EventLogEntryState {
-  const day = dayFromTick(state.simulation.tick, state.simulation.ticksPerDay);
+  const day = deriveGlobalDay(state.simulation.tick, state.simulation.ticksPerDay);
+  const actualDays = deriveBatchDay(state.simulation.tick, state.baseline.batch.startTick, state.simulation.ticksPerDay);
 
   return {
     id: `batch-completed-${state.simulation.tick}-${state.cockpit.roomOverview.batchId}`,
@@ -460,7 +466,7 @@ function batchCompletedEvent(state: OperationsCockpitRuntimeState): EventLogEntr
     tick: state.simulation.tick,
     severity: 'info',
     title: 'Batch completed.',
-    detail: 'Batch report generated.',
+    detail: `Batch report generated. Actual runtime ${actualDays} days.`,
   };
 }
 
@@ -502,15 +508,23 @@ function round(value: number, digits = 0) {
   return Math.round(value * factor) / factor;
 }
 
-function dayFromTick(tick: number, ticksPerDay: number) {
+export function deriveGlobalDay(tick: number, ticksPerDay: number): number {
   return Math.floor(tick / ticksPerDay) + 1;
 }
 
-function cycleProgressFromDay(day: number, cycleLengthDays: number) {
-  return clamp(Math.round((day / cycleLengthDays) * 100), 0, 100);
+export function deriveBatchElapsedTicks(globalTick: number, batchStartTick: number): number {
+  return Math.max(0, globalTick - batchStartTick);
 }
 
-function phaseFromCycleProgress(progress: number): OperationalPhase {
+export function deriveBatchDay(globalTick: number, batchStartTick: number, ticksPerDay: number): number {
+  return Math.floor(deriveBatchElapsedTicks(globalTick, batchStartTick) / ticksPerDay) + 1;
+}
+
+export function deriveCycleProgress(batchDay: number, cycleLengthDays: number): number {
+  return clamp(Math.round((batchDay / cycleLengthDays) * 100), 0, 100);
+}
+
+export function deriveOperationalPhase(progress: number): OperationalPhase {
   if (progress < 15) return 'Seedling';
   if (progress < 45) return 'Vegetative';
   if (progress < 85) return 'Flowering';

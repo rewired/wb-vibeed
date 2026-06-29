@@ -20,8 +20,8 @@
     "id": "B-017",
     "roomId": "R-01",
     "zoneId": "Z-01",
-    "phase": "Flowering",
     "cycleLengthDays": 39,
+    "startTick": 0,
     "status": "normal"
   },
   "capacity": {

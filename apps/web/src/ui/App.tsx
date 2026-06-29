@@ -304,9 +304,9 @@ function RoomContext({
             <ProgressBar value={cycle.progress} />
           </article>
           <article className="context-phase-days">
-            <span className="label">Phase / Days</span>
+            <span className="label">Phase / Batch Days</span>
             <strong>{cycle.phase}</strong>
-            <small>Day {cycle.currentDay} of {cycle.cycleLengthDays}</small>
+            <small>Batch Day {cycle.batchDay} of {cycle.cycleLengthDays}</small>
           </article>
         </div>
         <div className="batch-context-facts">
@@ -483,7 +483,7 @@ function BatchReportInspector({ report }: { report: BatchReport }) {
           <span className="label">Batch Report</span>
           <strong>Batch {report.batchId}</strong>
           <small>{report.roomId} / {report.zoneId}</small>
-          <small>Completed Day {report.completedDay} / Tick {report.completedTick}</small>
+          <small>Completed Global Day {report.completedDay} / Tick {report.completedTick}</small>
         </div>
         <b className={`status-pill status-${report.finalStatus}`}>Final Status: {titleCase(report.finalStatus)}</b>
       </section>
@@ -1128,7 +1128,7 @@ function batchCycleSummary(state: OperationsCockpitState) {
   const cycleProgress = state.batchStatus.find((item) => item.id === 'cycle-progress');
 
   return {
-    currentDay: runtime.currentDay,
+    batchDay: runtime.batchDay,
     cycleLengthDays: runtime.cycleLengthDays,
     phase: runtime.phase,
     progress: runtime.cycleProgress,

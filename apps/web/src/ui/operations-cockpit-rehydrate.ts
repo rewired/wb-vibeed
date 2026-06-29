@@ -8,7 +8,13 @@ import type {
   TelemetryKey,
   TrendTileState,
 } from './operations-cockpit-state-types';
-import { initializeOperationsCockpitRuntime } from './operations-cockpit-runtime';
+import {
+  deriveBatchDay,
+  deriveCycleProgress,
+  deriveGlobalDay,
+  deriveOperationalPhase,
+  initializeOperationsCockpitRuntime,
+} from './operations-cockpit-runtime';
 
 export function rehydrateOperationsCockpit(
   blueprint: OperationsCockpitBlueprint,
@@ -17,8 +23,10 @@ export function rehydrateOperationsCockpit(
     throw new Error(`Unsupported operations cockpit blueprint schema: ${blueprint.schemaVersion}`);
   }
 
-  const day = dayFromTick(blueprint.simulation.initialTick, blueprint.simulation.ticksPerDay);
-  const cycleProgress = cycleProgressFromDay(day, blueprint.batch.cycleLengthDays);
+  const globalDay = deriveGlobalDay(blueprint.simulation.initialTick, blueprint.simulation.ticksPerDay);
+  const batchDay = deriveBatchDay(blueprint.simulation.initialTick, blueprint.batch.startTick, blueprint.simulation.ticksPerDay);
+  const cycleProgress = deriveCycleProgress(batchDay, blueprint.batch.cycleLengthDays);
+  const phase = deriveOperationalPhase(cycleProgress);
   const lifecycleState = cycleProgress >= 100 ? 'ready' : 'active';
   const statusLabel = titleCase(blueprint.room.status);
   const telemetry = blueprint.telemetryBase;
@@ -46,13 +54,14 @@ export function rehydrateOperationsCockpit(
       },
       batch: {
         cycleLengthDays: blueprint.batch.cycleLengthDays,
+        startTick: blueprint.batch.startTick,
       },
     },
     cockpit: {
       header: {
         title: 'Room Cockpit',
         stats: [
-          { label: 'Day', value: day },
+          { label: 'Day', value: globalDay },
           { label: 'Tick', value: blueprint.simulation.initialTick },
           { label: 'Overall Status', value: statusLabel, status: blueprint.room.status },
           { label: 'Facility Load', value: blueprint.energy.powerNow, unit: 'kW', status: 'normal' },
@@ -65,21 +74,22 @@ export function rehydrateOperationsCockpit(
         roomId: blueprint.room.id,
         zoneId: blueprint.zone.id,
         batchId: blueprint.batch.id,
-        phase: blueprint.batch.phase,
+        phase,
         status: blueprint.room.status,
         activeView: '3d',
         overlays: ['Supply Air', 'Return Air', 'Exhaust', 'Light', 'Irrigation', 'Sensors'],
         capacity: rehydrateCapacity(blueprint.capacity),
       },
       batchRuntime: {
-        currentDay: day,
+        batchDay,
         cycleLengthDays: blueprint.batch.cycleLengthDays,
+        startTick: blueprint.batch.startTick,
         cycleProgress,
-        phase: 'Flowering',
+        phase,
         lifecycleState,
         readyForReview: lifecycleState === 'ready',
       },
-      batchStatus: rehydrateBatchStatus(blueprint, day, cycleProgress),
+      batchStatus: rehydrateBatchStatus(blueprint, batchDay, cycleProgress),
       environmentalTelemetry: [
         metric('air-temperature', 'Air Temperature', telemetry.airTemperature),
         metric('relative-humidity', 'Relative Humidity', telemetry.relativeHumidity),
@@ -231,7 +241,7 @@ function rehydrateCapacity(capacity: OperationsCockpitBlueprint['capacity']): Ro
 
 function rehydrateBatchStatus(
   blueprint: OperationsCockpitBlueprint,
-  day: number,
+  batchDay: number,
   cycleProgress: number,
 ): ProgressTileState[] {
   return [
@@ -240,7 +250,7 @@ function rehydrateBatchStatus(
       label: 'Cycle Progress',
       value: cycleProgress,
       unit: '%',
-      secondary: `Day ${day} of ${blueprint.batch.cycleLengthDays}`,
+      secondary: `Batch Day ${batchDay} of ${blueprint.batch.cycleLengthDays}`,
       status: blueprint.batch.status,
     },
     {
@@ -366,18 +376,6 @@ function trend(id: TrendTileState['id'], label: string, unit: string, currentVal
     range: '24h',
     points: offsets.map((offset) => round(currentValue + offset, unit === '°C' || unit === 'kW' ? 1 : 0)),
   };
-}
-
-function dayFromTick(tick: number, ticksPerDay: number) {
-  return Math.floor(tick / ticksPerDay) + 1;
-}
-
-function cycleProgressFromDay(day: number, cycleLengthDays: number) {
-  return clamp(Math.round((day / cycleLengthDays) * 100), 0, 100);
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
 }
 
 function clockFromTick(tick: number, ticksPerDay: number) {

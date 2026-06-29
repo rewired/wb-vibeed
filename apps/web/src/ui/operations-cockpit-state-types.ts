@@ -174,8 +174,9 @@ export interface BatchReport {
 }
 
 export interface BatchRuntimeSummaryState {
-  currentDay: number;
+  batchDay: number;
   cycleLengthDays: number;
+  startTick: number;
   cycleProgress: number;
   phase: OperationalPhase;
   lifecycleState: BatchLifecycleState;
@@ -259,6 +260,7 @@ export interface OperationsCockpitRuntimeBaseline {
   };
   batch: {
     cycleLengthDays: number;
+    startTick: number;
   };
 }
 
@@ -284,8 +286,8 @@ export interface OperationsCockpitBlueprint {
     id: string;
     roomId: string;
     zoneId: string;
-    phase: string;
     cycleLengthDays: number;
+    startTick: number;
     status: StatusLevel;
   };
   capacity: {
