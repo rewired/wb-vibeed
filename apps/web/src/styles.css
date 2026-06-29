@@ -803,6 +803,36 @@ button {
   gap: 7px;
 }
 
+.manual-target-control {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) 42px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid rgba(188, 205, 198, 0.1);
+  background: rgba(5, 8, 9, 0.3);
+}
+
+.manual-target-control input {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--green);
+}
+
+.manual-target-control input:disabled {
+  opacity: 0.36;
+  cursor: not-allowed;
+}
+
+.manual-target-control strong {
+  color: #dce3e0;
+  font-size: 12px;
+  line-height: 1;
+  text-align: right;
+}
+
 .segmented-control {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(0, 1fr));

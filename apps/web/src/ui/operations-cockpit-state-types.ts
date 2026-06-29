@@ -22,8 +22,8 @@ export type OperationalPhase = 'Seedling' | 'Vegetative' | 'Flowering' | 'Late F
 export type BatchLifecycleState = 'active' | 'ready' | 'completed';
 export type RuntimeWarningKey =
   | 'cycle-ready'
-  | 'filter-maintenance-due'
-  | 'sensor-network-warning'
+  | 'high-stress'
+  | 'low-vigor'
   | 'nutrient-reservoir-low';
 export type SelectedRoomObject =
   | 'canopy'
@@ -57,8 +57,6 @@ export type OperationsCockpitControlSystem = 'light' | 'climate' | 'irrigation';
 
 export type OperationsCockpitRuntimeAction =
   | { type: 'tick' }
-  | { type: 'complete-batch' }
-  | { type: 'start-next-batch' }
   | { type: 'set-running'; isRunning: boolean }
   | { type: 'set-speed'; speed: SimSpeed }
   | {
@@ -70,24 +68,28 @@ export type OperationsCockpitRuntimeAction =
       type: 'set-control-state';
       system: OperationsCockpitControlSystem;
       control: ControlState;
-    };
+    }
+  | {
+      type: 'set-manual-value';
+      system: OperationsCockpitControlSystem;
+      value: number;
+    }
+  | { type: 'complete-batch' }
+  | { type: 'start-next-batch' };
 
-export interface CockpitControlState {
-  light: {
-    mode: OperatingMode;
-    control: ControlState;
-    intensity: number;
-  };
-  climate: {
-    mode: OperatingMode;
-    control: ControlState;
-    targetBias: string;
-  };
-  irrigation: {
-    mode: OperatingMode;
-    control: ControlState;
-    irrigationIndex: number;
-  };
+export interface OperationsControlConfig {
+  mode: OperatingMode;
+  control: ControlState;
+  manualValue: number;
+}
+
+export type CockpitControlState = Record<OperationsCockpitControlSystem, OperationsControlConfig>;
+
+export interface BatchCoreState {
+  maturity: number;
+  stress: number;
+  vigor: number;
+  outputPotential: number;
 }
 
 export interface HeaderStat {
@@ -120,6 +122,8 @@ export interface ControlTileState {
   label: string;
   activeMode: OperatingMode;
   activeControl: ControlState;
+  manualValue: number;
+  effectiveTarget: number;
   primaryTuning: {
     label: string;
     value: string | number;
@@ -154,19 +158,13 @@ export interface WarningConditionState {
   object: SelectedRoomObject;
 }
 
-export type BatchModeUsage = Record<OperationsCockpitControlSystem, Record<OperatingMode, number>>;
-
 export interface BatchOutcomeAccumulators {
   elapsedTicks: number;
-  stableTicks: number;
   warningTicks: number;
   energyKwh: number;
   operatingCost: number;
   manualInterventions: number;
-  modeUsage: BatchModeUsage;
-  stabilityScore: number;
   efficiencyScore: number;
-  outcomeScore: number;
 }
 
 export interface BatchReport {
@@ -175,22 +173,16 @@ export interface BatchReport {
   zoneId: string;
   completedDay: number;
   completedTick: number;
-  cycleLengthDays: number;
-  actualDays: number;
-  finalHealthIndex: number;
-  finalMoistureBalance: number;
-  finalQualityEstimate: number;
-  finalYieldEstimate: number;
-  totalEnergyKwh: number;
-  totalCost: number;
-  elapsedTicks: number;
-  stableTicks: number;
-  warningTicks: number;
-  manualInterventions: number;
-  stabilityScore: number;
-  efficiencyScore: number;
-  outcomeScore: number;
-  warningCount: number;
+  batchDuration: number;
+  finalMaturity: number;
+  finalStress: number;
+  finalVigor: number;
+  finalOutputPotential: number;
+  yieldEstimate: number;
+  qualityEstimate: number;
+  operatingCost: number;
+  efficiency: number;
+  warnings: number;
   finalStatus: StatusLevel;
   summary: string;
 }
@@ -203,6 +195,7 @@ export interface BatchRuntimeSummaryState {
   phase: OperationalPhase;
   lifecycleState: BatchLifecycleState;
   readyForReview: boolean;
+  batchCore: BatchCoreState;
   accumulators: BatchOutcomeAccumulators;
   report?: BatchReport;
 }
@@ -333,12 +326,7 @@ export interface OperationsCockpitBlueprint {
     nutrientReservoir: BlueprintMetric;
   };
   controls: CockpitControlState;
-  batchStatus: {
-    healthIndex: number;
-    moistureBalance: number;
-    yieldForecast: number;
-    qualityEstimate: number;
-  };
+  batchCore: BatchCoreState;
   energy: {
     powerNow: number;
     dailyEnergy: number;

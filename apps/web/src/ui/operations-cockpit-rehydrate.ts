@@ -26,8 +26,9 @@ export function rehydrateOperationsCockpit(
 
   const globalDay = deriveGlobalDay(blueprint.simulation.initialTick, blueprint.simulation.ticksPerDay);
   const batchDay = deriveBatchDay(blueprint.simulation.initialTick, blueprint.batch.startTick, blueprint.simulation.ticksPerDay);
-  const cycleProgress = deriveCycleProgress(batchDay, blueprint.batch.cycleLengthDays);
-  const phase = deriveOperationalPhase(cycleProgress);
+  const batchCore = blueprint.batchCore;
+  const cycleProgress = deriveCycleProgress(batchCore.maturity);
+  const phase = deriveOperationalPhase(batchCore.maturity);
   const lifecycleState = cycleProgress >= 100 ? 'ready' : 'active';
   const statusLabel = titleCase(blueprint.room.status);
   const telemetry = blueprint.telemetryBase;
@@ -89,9 +90,10 @@ export function rehydrateOperationsCockpit(
         phase,
         lifecycleState,
         readyForReview: lifecycleState === 'ready',
+        batchCore,
         accumulators: createInitialBatchOutcomeAccumulators(),
       },
-      batchStatus: rehydrateBatchStatus(blueprint, batchDay, cycleProgress),
+      batchStatus: rehydrateBatchStatus(blueprint, batchDay, cycleProgress, phase),
       environmentalTelemetry: [
         metric('air-temperature', 'Air Temperature', telemetry.airTemperature),
         metric('relative-humidity', 'Relative Humidity', telemetry.relativeHumidity),
@@ -107,9 +109,12 @@ export function rehydrateOperationsCockpit(
           label: 'Light',
           activeMode: blueprint.controls.light.mode,
           activeControl: blueprint.controls.light.control,
+          manualValue: blueprint.controls.light.manualValue,
+          effectiveTarget: 65,
           primaryTuning: {
-            label: 'Target',
-            value: targetFromMode(blueprint.controls.light.mode),
+            label: 'Effective Output',
+            value: 65,
+            unit: '%',
           },
         },
         {
@@ -117,9 +122,12 @@ export function rehydrateOperationsCockpit(
           label: 'Climate',
           activeMode: blueprint.controls.climate.mode,
           activeControl: blueprint.controls.climate.control,
+          manualValue: blueprint.controls.climate.manualValue,
+          effectiveTarget: 65,
           primaryTuning: {
-            label: 'Target Bias',
-            value: blueprint.controls.climate.targetBias,
+            label: 'Effective Climate Effort',
+            value: 65,
+            unit: '%',
           },
         },
         {
@@ -127,9 +135,12 @@ export function rehydrateOperationsCockpit(
           label: 'Irrigation',
           activeMode: blueprint.controls.irrigation.mode,
           activeControl: blueprint.controls.irrigation.control,
+          manualValue: blueprint.controls.irrigation.manualValue,
+          effectiveTarget: 65,
           primaryTuning: {
-            label: 'Target Bias',
-            value: targetFromMode(blueprint.controls.irrigation.mode),
+            label: 'Effective Irrigation Index',
+            value: 65,
+            unit: '%',
           },
         },
       ],
@@ -246,44 +257,45 @@ function rehydrateBatchStatus(
   blueprint: OperationsCockpitBlueprint,
   batchDay: number,
   cycleProgress: number,
+  phase: string,
 ): ProgressTileState[] {
+  const batchCore = blueprint.batchCore;
+
   return [
     {
       id: 'cycle-progress',
       label: 'Cycle Progress',
       value: cycleProgress,
       unit: '%',
-      secondary: `Batch Day ${batchDay} of ${blueprint.batch.cycleLengthDays}`,
+      secondary: `Batch Day ${batchDay} / ${phase}`,
       status: blueprint.batch.status,
     },
     {
-      id: 'batch-health-index',
-      label: 'Batch Health Index',
-      value: blueprint.batchStatus.healthIndex,
+      id: 'maturity',
+      label: 'Maturity',
+      value: batchCore.maturity,
       unit: '/100',
-      secondary: 'Stable',
       status: blueprint.batch.status,
     },
     {
-      id: 'moisture-balance',
-      label: 'Moisture Balance',
-      value: blueprint.batchStatus.moistureBalance,
-      unit: '%',
+      id: 'stress',
+      label: 'Stress',
+      value: batchCore.stress,
+      unit: '/100',
       status: blueprint.batch.status,
     },
     {
-      id: 'yield-forecast',
-      label: 'Yield Forecast',
-      value: blueprint.batchStatus.yieldForecast,
-      unit: 'units',
+      id: 'vigor',
+      label: 'Vigor',
+      value: batchCore.vigor,
+      unit: '/100',
       status: blueprint.batch.status,
     },
     {
-      id: 'quality-estimate',
-      label: 'Quality Estimate',
-      value: blueprint.batchStatus.qualityEstimate,
-      unit: '%',
-      secondary: 'Good',
+      id: 'output-potential',
+      label: 'Output Potential',
+      value: batchCore.outputPotential,
+      unit: '/100',
       status: blueprint.batch.status,
     },
   ];
@@ -404,12 +416,6 @@ function slug(value: string) {
 
 function titleCase(value: string) {
   return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
-}
-
-function targetFromMode(mode: OperationsCockpitBlueprint['controls']['light']['mode']) {
-  if (mode === 'Eco') return 'Eco';
-  if (mode === 'Push') return 'Push';
-  return 'Nominal';
 }
 
 function utilitySummary(blueprint: OperationsCockpitBlueprint) {

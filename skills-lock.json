@@ -13,6 +13,12 @@
       "skillPath": "plugins/javascript-typescript/skills/typescript-advanced-types/SKILL.md",
       "computedHash": "8cbf2bf600f392d7260e476e3202932a876e2281cda3b15a8b6a5a43f383252d"
     },
+    "typescript-refactor": {
+      "source": "pproenca/dot-skills",
+      "sourceType": "github",
+      "skillPath": "skills/.experimental/typescript-refactor/SKILL.md",
+      "computedHash": "8ea8df719cd12f7f3c7502341c75379ef19b27a5c011e34c27081545c23a094f"
+    },
     "vercel-react-best-practices": {
       "source": "vercel-labs/agent-skills",
       "sourceType": "github",

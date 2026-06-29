@@ -9,7 +9,7 @@
   "room": {
     "id": "R-01",
     "label": "Room R-01",
-    "status": "warning"
+    "status": "normal"
   },
   "zone": {
     "id": "Z-01",
@@ -102,24 +102,24 @@
     "light": {
       "mode": "Balanced",
       "control": "Auto",
-      "intensity": 72
+      "manualValue": 65
     },
     "climate": {
       "mode": "Balanced",
       "control": "Auto",
-      "targetBias": "Balanced"
+      "manualValue": 65
     },
     "irrigation": {
       "mode": "Balanced",
       "control": "Auto",
-      "irrigationIndex": 46
+      "manualValue": 65
     }
   },
-  "batchStatus": {
-    "healthIndex": 78,
-    "moistureBalance": 54,
-    "yieldForecast": 1248,
-    "qualityEstimate": 82
+  "batchCore": {
+    "maturity": 62,
+    "stress": 18,
+    "vigor": 76,
+    "outputPotential": 42
   },
   "energy": {
     "powerNow": 18.6,

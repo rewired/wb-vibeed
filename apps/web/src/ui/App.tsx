@@ -116,6 +116,12 @@ export function App() {
     dispatch({ type: 'set-control-state', system, control: controlValue });
   }
 
+  function handleManualValueChange(controlId: string, value: number) {
+    const system = controlSystemFromId(controlId);
+    if (!system) return;
+    dispatch({ type: 'set-manual-value', system, value });
+  }
+
   function toggleEventDrawer() {
     setEventDrawerState((current) => (current === 'collapsed' ? 'expanded' : 'collapsed'));
   }
@@ -165,6 +171,7 @@ export function App() {
             selectedObject={selectedObject}
             onModeChange={handleControlModeChange}
             onControlChange={handleControlStateChange}
+            onManualValueChange={handleManualValueChange}
             reportViewState={reportViewState}
             onCompleteBatch={handleCompleteBatch}
             onStartNextBatch={handleStartNextBatch}
@@ -408,6 +415,7 @@ function ObjectInspector({
   selectedObject,
   onModeChange,
   onControlChange,
+  onManualValueChange,
   reportViewState,
   onCompleteBatch,
   onStartNextBatch,
@@ -419,6 +427,7 @@ function ObjectInspector({
   selectedObject: SelectedRoomObject;
   onModeChange: (controlId: string, mode: OperatingMode) => void;
   onControlChange: (controlId: string, controlValue: ControlState) => void;
+  onManualValueChange: (controlId: string, value: number) => void;
   reportViewState: ReportViewState;
   onCompleteBatch: () => void;
   onStartNextBatch: () => void;
@@ -443,6 +452,7 @@ function ObjectInspector({
           selectedObject={selectedObject}
           onModeChange={onModeChange}
           onControlChange={onControlChange}
+          onManualValueChange={onManualValueChange}
           reportViewState={reportViewState}
           onCompleteBatch={onCompleteBatch}
           onStartNextBatch={onStartNextBatch}
@@ -460,6 +470,7 @@ function InspectorContent({
   selectedObject,
   onModeChange,
   onControlChange,
+  onManualValueChange,
   reportViewState,
   onCompleteBatch,
   onStartNextBatch,
@@ -471,6 +482,7 @@ function InspectorContent({
   selectedObject: SelectedRoomObject;
   onModeChange: (controlId: string, mode: OperatingMode) => void;
   onControlChange: (controlId: string, controlValue: ControlState) => void;
+  onManualValueChange: (controlId: string, value: number) => void;
   reportViewState: ReportViewState;
   onCompleteBatch: () => void;
   onStartNextBatch: () => void;
@@ -483,11 +495,12 @@ function InspectorContent({
         state={state}
         system="lighting"
         control={controlByLabel(state.controls, 'Light')}
-        targetLabel="Target"
+        targetLabel="Effective Output"
         metrics={['light-output']}
         fallbackEvent="No recent lighting event"
         onModeChange={onModeChange}
         onControlChange={onControlChange}
+        onManualValueChange={onManualValueChange}
       />
     );
   }
@@ -497,11 +510,12 @@ function InspectorContent({
         state={state}
         system="climate"
         control={controlByLabel(state.controls, 'Climate')}
-        targetLabel="Target Bias"
+        targetLabel="Effective Climate Effort"
         metrics={['air-temperature', 'relative-humidity', 'airflow']}
         fallbackEvent="No recent climate event"
         onModeChange={onModeChange}
         onControlChange={onControlChange}
+        onManualValueChange={onManualValueChange}
       />
     );
   }
@@ -511,11 +525,12 @@ function InspectorContent({
         state={state}
         system="irrigation"
         control={controlByLabel(state.controls, 'Irrigation')}
-        targetLabel="Target Bias"
+        targetLabel="Effective Irrigation Index"
         metrics={['irrigation-index']}
         fallbackEvent="No recent irrigation event"
         onModeChange={onModeChange}
         onControlChange={onControlChange}
+        onManualValueChange={onManualValueChange}
       />
     );
   }
@@ -562,37 +577,28 @@ function BatchReportInspector({
       <ReportSection
         title="Harvest Outcome"
         rows={[
-          ['Yield Estimate', `${report.finalYieldEstimate} units`],
-          ['Quality Estimate', `${report.finalQualityEstimate}%`],
-          ['Health Index', `${report.finalHealthIndex}/100`],
-          ['Moisture Balance', `${report.finalMoistureBalance}%`],
+          ['Yield Estimate', `${report.yieldEstimate} units`],
+          ['Quality Estimate', `${report.qualityEstimate}%`],
+          ['Output Potential', `${report.finalOutputPotential}/100`],
+          ['Maturity', `${report.finalMaturity}/100`],
         ]}
       />
       <ReportSection
-        title="Operational Summary"
+        title="Core Values"
         rows={[
-          ['Warning Count', String(report.warningCount)],
-          ['Actual Runtime Days', `${report.actualDays}`],
-          ['Planned Cycle Length', `${report.cycleLengthDays} days`],
-          ['Elapsed Batch Ticks', String(report.elapsedTicks)],
-          ['Stable Operation Ticks', String(report.stableTicks)],
+          ['Final Stress', `${report.finalStress}/100`],
+          ['Final Vigor', `${report.finalVigor}/100`],
+          ['Warnings', String(report.warnings)],
+          ['Batch Duration', `${report.batchDuration} ticks`],
         ]}
       />
       <ReportSection
         title="Operational Performance"
         rows={[
-          ['Stability Score', `${report.stabilityScore}%`],
-          ['Efficiency Score', `${report.efficiencyScore}%`],
-          ['Outcome Score', `${report.outcomeScore}%`],
-          ['Warning Ticks', String(report.warningTicks)],
-          ['Manual Interventions', String(report.manualInterventions)],
-        ]}
-      />
-      <ReportSection
-        title="Cost Summary"
-        rows={[
-          ['Total Energy', `${report.totalEnergyKwh.toLocaleString('en-US')} kWh`],
-          ['Total Cost', formatValue(report.totalCost, '$')],
+          ['Operating Cost', formatValue(report.operatingCost, '$')],
+          ['Efficiency', `${report.efficiency}%`],
+          ['Completed Tick', String(report.completedTick)],
+          ['Completed Day', String(report.completedDay)],
         ]}
       />
       <article className="report-summary-copy">
@@ -620,12 +626,12 @@ function BatchPerformanceSummary({ accumulators }: { accumulators: BatchOutcomeA
     <section className="batch-performance-panel" aria-label="Batch performance">
       <div className="batch-performance-header">
         <span className="label">Batch Performance</span>
-        <strong>{accumulators.outcomeScore}% outcome</strong>
+        <strong>{accumulators.efficiencyScore}% efficiency</strong>
       </div>
       <dl>
         <div>
-          <dt>Stability</dt>
-          <dd>{accumulators.stabilityScore}%</dd>
+          <dt>Elapsed</dt>
+          <dd>{accumulators.elapsedTicks} ticks</dd>
         </div>
         <div>
           <dt>Efficiency</dt>
@@ -669,15 +675,17 @@ function ControlledSystemInspector({
   fallbackEvent,
   onModeChange,
   onControlChange,
+  onManualValueChange,
 }: {
   state: OperationsCockpitState;
   system: SelectedRoomObject;
   control: ControlTileState | undefined;
-  targetLabel: 'Target' | 'Target Bias';
+  targetLabel: 'Effective Output' | 'Effective Climate Effort' | 'Effective Irrigation Index';
   metrics: TelemetryKey[];
   fallbackEvent: string;
   onModeChange: (controlId: string, mode: OperatingMode) => void;
   onControlChange: (controlId: string, controlValue: ControlState) => void;
+  onManualValueChange: (controlId: string, value: number) => void;
 }) {
   const lastEvent = lastEventForObject(state.eventLog, system, fallbackEvent);
 
@@ -697,9 +705,23 @@ function ControlledSystemInspector({
               onChange={(controlValue) => onControlChange(control.id, controlValue)}
             />
           </div>
+          <label className="manual-target-control">
+            <span className="label">Manual Target</span>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={control.manualValue}
+              disabled={control.activeControl !== 'Manual'}
+              onChange={(event) => onManualValueChange(control.id, Number(event.currentTarget.value))}
+            />
+            <strong>{control.manualValue}%</strong>
+          </label>
           <InspectorFacts
             facts={[
               ['Status', 'Online'],
+              ['Mode Target', `${modeTargetLabel(control.activeMode)}%`],
               [targetLabel, formatInspectorValue(control.primaryTuning)],
             ]}
           />
@@ -749,6 +771,7 @@ function CanopyInspector({
 }) {
   const canopy = capacityById(state.roomOverview.capacity, 'canopy-tables');
   const runtime = state.batchRuntime;
+  const core = runtime.batchCore;
   const report = runtime.report;
   const lifecycleStatus = lifecycleStatusLevel(runtime.lifecycleState, report);
   const selectedReport = reportViewState.type === 'open'
@@ -781,18 +804,18 @@ function CanopyInspector({
           <small>{state.roomOverview.roomId} / {state.roomOverview.zoneId}</small>
         </article>
         <article>
-          <span className="label">Batch Day</span>
-          <strong>{runtime.batchDay} of {runtime.cycleLengthDays}</strong>
+          <span className="label">Maturity</span>
+          <strong>{Math.round(core.maturity)}/100</strong>
           <small>{canopy?.active ?? 0} canopy tables active</small>
         </article>
         <article>
-          <span className="label">Phase</span>
-          <strong>{runtime.phase}</strong>
-          <small>{lifecycleStateLabel(runtime.lifecycleState)}</small>
+          <span className="label">Stress / Vigor</span>
+          <strong>{Math.round(core.stress)} / {Math.round(core.vigor)}</strong>
+          <small>{runtime.phase}</small>
         </article>
         <article className={`status-${lifecycleStatus}`}>
-          <span className="label">Cycle Progress</span>
-          <strong>{runtime.cycleProgress}%</strong>
+          <span className="label">Output Potential</span>
+          <strong>{Math.round(core.outputPotential)}/100</strong>
           <ProgressBar value={runtime.cycleProgress} />
         </article>
       </section>
@@ -813,6 +836,7 @@ function CanopyInspector({
             ['State', lifecycleStateLabel(runtime.lifecycleState)],
             ['Phase', runtime.phase],
             ['Batch Day', `${runtime.batchDay} of ${runtime.cycleLengthDays}`],
+            ['Output Potential', `${Math.round(core.outputPotential)}/100`],
             ['Report', report ? 'Available' : 'Not available'],
           ]}
         />
@@ -867,11 +891,11 @@ function CanopyInspector({
             </div>
             <div>
               <dt>Yield Estimate</dt>
-              <dd>{report.finalYieldEstimate} units</dd>
+              <dd>{report.yieldEstimate} units</dd>
             </div>
             <div>
               <dt>Quality Estimate</dt>
-              <dd>{report.finalQualityEstimate}%</dd>
+              <dd>{report.qualityEstimate}%</dd>
             </div>
           </dl>
         </section>
@@ -910,7 +934,7 @@ function RecentBatchReports({
                 </div>
                 <div>
                   <dt>Quality</dt>
-                  <dd>{report.finalQualityEstimate}%</dd>
+                  <dd>{report.qualityEstimate}%</dd>
                 </div>
               </dl>
               <button className="report-row-action" type="button" onClick={() => onViewReport(report)}>
@@ -1346,24 +1370,21 @@ function inspectorHeader(state: OperationsCockpitState, selectedObject: Selected
 }
 
 function batchContextGroups(state: OperationsCockpitState): { label: string; rows: [string, string][] }[] {
-  const healthIndex = state.batchStatus.find((item) => item.id === 'batch-health-index');
-  const moistureBalance = state.batchStatus.find((item) => item.id === 'moisture-balance');
-  const yieldForecast = state.batchStatus.find((item) => item.id === 'yield-forecast');
-  const qualityEstimate = state.batchStatus.find((item) => item.id === 'quality-estimate');
+  const core = state.batchRuntime.batchCore;
 
   return [
     {
-      label: 'Health / Yield',
+      label: 'Batch Core',
       rows: [
-        ['Health Index', healthIndex ? formatValue(healthIndex.value, healthIndex.unit) : 'Unavailable'],
-        ['Yield Forecast', yieldForecast ? formatValue(yieldForecast.value, yieldForecast.unit) : 'Unavailable'],
+        ['Maturity', `${Math.round(core.maturity)}/100`],
+        ['Output Potential', `${Math.round(core.outputPotential)}/100`],
       ],
     },
     {
-      label: 'Moisture / Quality',
+      label: 'Condition',
       rows: [
-        ['Moisture Balance', moistureBalance ? formatValue(moistureBalance.value, moistureBalance.unit) : 'Unavailable'],
-        ['Quality Estimate', qualityEstimate ? formatValue(qualityEstimate.value, qualityEstimate.unit) : 'Unavailable'],
+        ['Stress', `${Math.round(core.stress)}/100`],
+        ['Vigor', `${Math.round(core.vigor)}/100`],
       ],
     },
   ];
@@ -1482,10 +1503,6 @@ function objectRuntimeStatus(state: OperationsCockpitState, object: SelectedRoom
     return objectStatus(normalLabel, statusShortLabel('normal'), statusIcon('normal'), 'normal');
   }
 
-  if (warning.key === 'filter-maintenance-due') {
-    return objectStatus('Maintenance Due', 'Due', 'build_circle', 'warning');
-  }
-
   if (warning.key === 'cycle-ready') {
     return objectStatus('Harvest Ready', 'Ready', 'task_alt', 'warning');
   }
@@ -1528,6 +1545,16 @@ function controlByLabel(items: ControlTileState[], label: string) {
 function controlMode(item?: ControlTileState) {
   if (!item) return 'Balanced / Auto';
   return `${titleCase(item.activeMode)} / ${titleCase(item.activeControl)}`;
+}
+
+function modeTargetLabel(mode: OperatingMode) {
+  const targets: Record<OperatingMode, number> = {
+    Eco: 40,
+    Balanced: 65,
+    Push: 85,
+  };
+
+  return targets[mode];
 }
 
 function navIcon(item: string) {
