@@ -382,23 +382,58 @@ function advanceBatchCore(batchCore: BatchCoreState, controls: ControlTileState[
   const irrigationTarget = effectiveTargetByLabel(controls, 'Irrigation');
   const operatingPressure = (lightTarget + climateTarget + irrigationTarget) / 3;
   const balancePenalty =
-    Math.abs(lightTarget - climateTarget) * 0.04
-    + Math.abs(irrigationTarget - climateTarget) * 0.03;
-  const pushPressure = Math.max(0, operatingPressure - 70) * 0.04;
-  const ecoDrag = Math.max(0, 55 - operatingPressure) * 0.03;
-  const stress = clamp(batchCore.stress + pushPressure + balancePenalty - 0.18, 0, 100);
-  const vigor = clamp(batchCore.vigor + (70 - stress) * 0.015 - ecoDrag, 0, 100);
+    imbalanceGap(lightTarget, climateTarget) * 0.04
+    + imbalanceGap(irrigationTarget, climateTarget) * 0.035
+    + imbalanceGap(lightTarget, irrigationTarget) * 0.015;
+  const pushPressure = Math.max(0, operatingPressure - 72) * 0.05;
+  const lowPressureStress = Math.max(0, 45 - operatingPressure) * 0.012;
+  const stressRelief = Math.max(0, 70 - operatingPressure) * 0.01;
+  const stress = clamp(
+    batchCore.stress + pushPressure + lowPressureStress + balancePenalty - stressRelief - 0.16,
+    0,
+    100,
+  );
+  const balanceBonus = Math.max(0, 6 - balancePenalty) * 0.03;
+  const pressureVigorPenalty = Math.max(0, operatingPressure - 76) * 0.055;
+  const lowPressureVigorPenalty = Math.max(0, 54 - operatingPressure) * 0.016;
+  const stressVigorPenalty = Math.max(0, stress - 55) * 0.02;
+  const vigor = clamp(
+    batchCore.vigor
+      + (66 - stress) * 0.014
+      + balanceBonus
+      - pressureVigorPenalty
+      - lowPressureVigorPenalty
+      - stressVigorPenalty,
+    0,
+    100,
+  );
+  const outputCeiling = clamp(
+    55
+      + operatingPressure * 0.58
+      + (vigor - 70) * 0.08
+      - balancePenalty * 0.8
+      - Math.max(0, stress - 60) * 0.3,
+    35,
+    100,
+  );
+  const outputGain =
+    vigor * 0.0048
+    + Math.max(0, operatingPressure - 42) * 0.0095
+    - Math.max(0, stress - 42) * 0.006
+    - Math.max(0, stress - 72) * 0.018
+    - balancePenalty * 0.04;
+  const outputRoomFactor = clamp((outputCeiling - batchCore.outputPotential) / 70, 0, 1);
+  const outputOverCeilingDecay = Math.max(0, batchCore.outputPotential - outputCeiling) * 0.03;
   const outputPotential = clamp(
     batchCore.outputPotential
-      + vigor * 0.012
-      + Math.max(0, operatingPressure - 55) * 0.015
-      - stress * 0.01,
+      + outputGain * outputRoomFactor
+      - outputOverCeilingDecay,
     0,
     100,
   );
 
   return {
-    maturity: clamp(batchCore.maturity + 0.35 + operatingPressure * 0.004, 0, 100),
+    maturity: clamp(batchCore.maturity + 0.25 + operatingPressure * 0.0048 - stress * 0.00055, 0, 100),
     stress,
     vigor,
     outputPotential,
@@ -634,7 +669,7 @@ function deriveControls(controls: ControlTileState[]) {
 function derivePowerNow(state: OperationsCockpitRuntimeState, controls: ControlTileState[]) {
   const targetLoad = controls.reduce((total, control) => total + control.effectiveTarget, 0) / 100;
 
-  return round(clamp(state.baseline.energy.powerNow * 0.45 + targetLoad * 5.2 + wave(elapsedTick(state), 0.25, 15), 8, 28), 1);
+  return round(clamp(state.baseline.energy.powerNow * 0.38 + targetLoad * 5.9 + wave(elapsedTick(state), 0.25, 15), 8, 28), 1);
 }
 
 function deriveEnergyCost(
@@ -809,6 +844,10 @@ function numericMetric(items: { label: string; value: string | number }[], label
 
 function effectiveTargetByLabel(items: ControlTileState[], label: string) {
   return items.find((item) => item.label === label)?.effectiveTarget ?? 65;
+}
+
+function imbalanceGap(firstTarget: number, secondTarget: number) {
+  return Math.max(0, Math.abs(firstTarget - secondTarget) - 5);
 }
 
 function effectiveLabel(label: string) {

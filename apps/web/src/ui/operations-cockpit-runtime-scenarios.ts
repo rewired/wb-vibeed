@@ -3,10 +3,13 @@ import { rehydrateOperationsCockpit } from './operations-cockpit-rehydrate';
 import {
   advanceOperationsCockpitRuntime,
   deriveGlobalDay,
+  generateBatchReport,
   getModeTarget,
 } from './operations-cockpit-runtime';
 import type {
   BatchCoreState,
+  BatchReport,
+  CockpitControlState,
   EventLogEntryState,
   OperatingMode,
   OperationsCockpitBlueprint,
@@ -14,6 +17,7 @@ import type {
   OperationsCockpitRuntimeAction,
   OperationsCockpitRuntimeState,
   RuntimeWarningKey,
+  StatusLevel,
   TelemetryKey,
 } from './operations-cockpit-state-types';
 
@@ -21,6 +25,20 @@ export type RuntimeScenarioResult = {
   name: string;
   passed: boolean;
   message?: string;
+};
+export type RuntimeProfileScenarioName = 'Eco' | 'Balanced' | 'Push' | 'Manual Balanced' | 'Manual Bad Balance';
+export type RuntimeProfileScenarioSummary = {
+  name: RuntimeProfileScenarioName;
+  ticksRun: number;
+  firstReadyTick?: number;
+  totalCost: number;
+  warningTicks: number;
+  finalCore: BatchCoreState;
+  yieldEstimate: number;
+  qualityEstimate: number;
+  efficiency: number;
+  finalStatus: StatusLevel;
+  warningKeys: RuntimeWarningKey[];
 };
 
 const blueprint = blueprintData as OperationsCockpitBlueprint;
@@ -50,11 +68,68 @@ export function runRuntimeScenarioChecks(): RuntimeScenarioResult[] {
     runScenario('running tick advances deterministically', checkRunningTickDeterminism),
     runScenario('manual controls affect effective targets', checkManualControls),
     runScenario('mode targets are ordered', checkModeTargetOrdering),
+    runScenario('operating profiles have directional outcomes', checkOperatingProfileOutcomes),
+    runScenario('manual profile balance affects outcomes', checkManualProfileOutcomes),
     runScenario('batch lifecycle reaches harvest ready once', checkBatchLifecycleReady),
     runScenario('complete batch freezes report', checkCompleteBatchFreezesReport),
     runScenario('start next batch preserves global time', checkStartNextBatch),
     runScenario('event log does not spam warnings', checkEventLogSpamPrevention),
   ];
+}
+
+export function runEcoScenario(): RuntimeProfileScenarioSummary {
+  return runProfileScenario({
+    name: 'Eco',
+    controls: {
+      light: { mode: 'Eco', control: 'Auto', manualValue: 65 },
+      climate: { mode: 'Eco', control: 'Auto', manualValue: 65 },
+      irrigation: { mode: 'Eco', control: 'Auto', manualValue: 65 },
+    },
+  });
+}
+
+export function runBalancedScenario(): RuntimeProfileScenarioSummary {
+  return runProfileScenario({
+    name: 'Balanced',
+    controls: {
+      light: { mode: 'Balanced', control: 'Auto', manualValue: 65 },
+      climate: { mode: 'Balanced', control: 'Auto', manualValue: 65 },
+      irrigation: { mode: 'Balanced', control: 'Auto', manualValue: 65 },
+    },
+  });
+}
+
+export function runPushScenario(): RuntimeProfileScenarioSummary {
+  return runProfileScenario({
+    name: 'Push',
+    controls: {
+      light: { mode: 'Push', control: 'Auto', manualValue: 65 },
+      climate: { mode: 'Push', control: 'Auto', manualValue: 65 },
+      irrigation: { mode: 'Push', control: 'Auto', manualValue: 65 },
+    },
+  });
+}
+
+export function runManualBalancedScenario(): RuntimeProfileScenarioSummary {
+  return runProfileScenario({
+    name: 'Manual Balanced',
+    controls: {
+      light: { mode: 'Balanced', control: 'Manual', manualValue: 70 },
+      climate: { mode: 'Balanced', control: 'Manual', manualValue: 70 },
+      irrigation: { mode: 'Balanced', control: 'Manual', manualValue: 65 },
+    },
+  });
+}
+
+export function runManualBadBalanceScenario(): RuntimeProfileScenarioSummary {
+  return runProfileScenario({
+    name: 'Manual Bad Balance',
+    controls: {
+      light: { mode: 'Balanced', control: 'Manual', manualValue: 90 },
+      climate: { mode: 'Balanced', control: 'Manual', manualValue: 40 },
+      irrigation: { mode: 'Balanced', control: 'Manual', manualValue: 80 },
+    },
+  });
 }
 
 function checkDeterministicRehydration(): void {
@@ -131,6 +206,45 @@ function checkModeTargetOrdering(): void {
 
   assert(typeof eco === 'number' && typeof balanced === 'number' && typeof push === 'number', 'mode target missing');
   assert(eco < balanced && balanced < push, 'mode targets are not ordered Eco < Balanced < Push');
+}
+
+function checkOperatingProfileOutcomes(): void {
+  const eco = runEcoScenario();
+  const balanced = runBalancedScenario();
+  const push = runPushScenario();
+
+  assert(eco.totalCost < balanced.totalCost, 'Eco scenario total cost was not lower than Balanced');
+  assert(balanced.totalCost < push.totalCost, 'Balanced scenario total cost was not lower than Push');
+  assert(eco.finalCore.outputPotential <= balanced.finalCore.outputPotential, 'Eco output potential exceeded Balanced');
+  assert(push.finalCore.stress > balanced.finalCore.stress, 'Push stress was not higher than Balanced');
+  assert(balanced.finalCore.vigor >= push.finalCore.vigor, 'Balanced vigor was lower than long-run Push vigor');
+  assert(
+    readyTick(push) < readyTick(balanced),
+    'Push did not reach ready state before Balanced',
+  );
+}
+
+function checkManualProfileOutcomes(): void {
+  const eco = runEcoScenario();
+  const manualBalanced = runManualBalancedScenario();
+  const manualBadBalance = runManualBadBalanceScenario();
+
+  assert(
+    manualBadBalance.finalCore.stress > manualBalanced.finalCore.stress,
+    'Bad manual balance did not increase stress over balanced manual values',
+  );
+  assert(
+    manualBadBalance.finalCore.outputPotential < manualBalanced.finalCore.outputPotential,
+    'Bad manual balance did not reduce output potential',
+  );
+  assert(
+    manualBadBalance.qualityEstimate < manualBalanced.qualityEstimate,
+    'Bad manual balance did not reduce quality estimate',
+  );
+  assert(
+    manualBalanced.finalCore.outputPotential >= eco.finalCore.outputPotential,
+    'Balanced manual values underperformed Eco output potential',
+  );
 }
 
 function checkBatchLifecycleReady(): void {
@@ -233,6 +347,70 @@ function createRuntime(): OperationsCockpitRuntimeState {
   return rehydrateOperationsCockpit(blueprint);
 }
 
+function runProfileScenario({
+  name,
+  controls,
+}: {
+  name: RuntimeProfileScenarioName;
+  controls: CockpitControlState;
+}): RuntimeProfileScenarioSummary {
+  let runtime = applyScenarioControls(createRuntime(), controls);
+  runtime = dispatch(runtime, { type: 'set-running', isRunning: true });
+
+  const ticksRun = runtime.cockpit.batchRuntime.cycleLengthDays * runtime.simulation.ticksPerDay;
+  let firstReadyTick: number | undefined;
+
+  for (let index = 0; index < ticksRun; index += 1) {
+    runtime = dispatch(runtime, { type: 'tick' });
+
+    if (firstReadyTick === undefined && runtime.cockpit.batchRuntime.lifecycleState === 'ready') {
+      firstReadyTick = index + 1;
+    }
+  }
+
+  const report = generateBatchReport(runtime);
+
+  return profileScenarioSummary(name, runtime, ticksRun, firstReadyTick, report);
+}
+
+function applyScenarioControls(
+  runtime: OperationsCockpitRuntimeState,
+  controls: CockpitControlState,
+): OperationsCockpitRuntimeState {
+  let next = runtime;
+
+  for (const system of CONTROL_SYSTEMS) {
+    const control = controls[system];
+    next = dispatch(next, { type: 'set-control-mode', system, mode: control.mode });
+    next = dispatch(next, { type: 'set-control-state', system, control: control.control });
+    next = dispatch(next, { type: 'set-manual-value', system, value: control.manualValue });
+  }
+
+  return next;
+}
+
+function profileScenarioSummary(
+  name: RuntimeProfileScenarioName,
+  runtime: OperationsCockpitRuntimeState,
+  ticksRun: number,
+  firstReadyTick: number | undefined,
+  report: BatchReport,
+): RuntimeProfileScenarioSummary {
+  return {
+    name,
+    ticksRun,
+    ...(firstReadyTick === undefined ? {} : { firstReadyTick }),
+    totalCost: report.operatingCost,
+    warningTicks: runtime.cockpit.batchRuntime.accumulators.warningTicks,
+    finalCore: runtime.cockpit.batchRuntime.batchCore,
+    yieldEstimate: report.yieldEstimate,
+    qualityEstimate: report.qualityEstimate,
+    efficiency: report.efficiency,
+    finalStatus: report.finalStatus,
+    warningKeys: runtime.cockpit.warningConditions.map((warning) => warning.key),
+  };
+}
+
 function dispatch(
   state: OperationsCockpitRuntimeState,
   action: OperationsCockpitRuntimeAction,
@@ -283,6 +461,10 @@ function telemetryAfterManualTick(system: OperationsCockpitControlSystem, manual
   state = dispatch(state, { type: 'tick' });
 
   return numericTelemetry(state, CONTROL_TELEMETRY[system]);
+}
+
+function readyTick(summary: RuntimeProfileScenarioSummary): number {
+  return summary.firstReadyTick ?? Number.POSITIVE_INFINITY;
 }
 
 function controlForSystem(state: OperationsCockpitRuntimeState, system: OperationsCockpitControlSystem) {
