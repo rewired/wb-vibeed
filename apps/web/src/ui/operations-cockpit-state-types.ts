@@ -58,6 +58,7 @@ export type OperationsCockpitControlSystem = 'light' | 'climate' | 'irrigation';
 export type OperationsCockpitRuntimeAction =
   | { type: 'tick' }
   | { type: 'complete-batch' }
+  | { type: 'start-next-batch' }
   | { type: 'set-running'; isRunning: boolean }
   | { type: 'set-speed'; speed: SimSpeed }
   | {
@@ -243,6 +244,7 @@ export interface OperationsCockpitRuntimeState {
   cockpit: OperationsCockpitState;
   baseline: OperationsCockpitRuntimeBaseline;
   activeWarnings: RuntimeWarningKey[];
+  completedBatchReports: BatchReport[];
 }
 
 export interface OperationsCockpitRuntimeBaseline {

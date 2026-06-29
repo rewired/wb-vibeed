@@ -183,6 +183,7 @@ export function rehydrateOperationsCockpit(
       ],
     },
     activeWarnings: [],
+    completedBatchReports: [],
   });
 }
 

@@ -122,6 +122,11 @@ export function App() {
     setEventDrawerState('expanded');
   }
 
+  function handleStartNextBatch() {
+    dispatch({ type: 'start-next-batch' });
+    setEventDrawerState('expanded');
+  }
+
   function handleSelectObject(object: SelectedRoomObject) {
     setSelectedObject(object);
   }
@@ -162,6 +167,7 @@ export function App() {
         lifecycleState={displayState.batchRuntime.lifecycleState}
         onToggle={toggleEventDrawer}
         onCompleteBatch={handleCompleteBatch}
+        onStartNextBatch={handleStartNextBatch}
         onViewReport={() => setEventDrawerState('report')}
         onBackToEvents={() => setEventDrawerState('expanded')}
       />
@@ -475,7 +481,7 @@ function InspectorContent({
   return <ExhaustInspector state={state} />;
 }
 
-function BatchReportInspector({ report }: { report: BatchReport }) {
+function BatchReportInspector({ report, onStartNextBatch }: { report: BatchReport; onStartNextBatch: () => void }) {
   return (
     <div className="batch-report-view">
       <section className="report-header-block">
@@ -516,6 +522,12 @@ function BatchReportInspector({ report }: { report: BatchReport }) {
         <span className="label">Summary</span>
         <strong>{report.summary}</strong>
       </article>
+      <footer className="report-action-footer">
+        <button className="event-action-button event-action-primary" type="button" onClick={onStartNextBatch}>
+          <Icon name="play_arrow" size="sm" />
+          <span>Start Next Batch</span>
+        </button>
+      </footer>
     </div>
   );
 }
@@ -745,6 +757,7 @@ function EventLogDrawer({
   lifecycleState,
   onToggle,
   onCompleteBatch,
+  onStartNextBatch,
   onViewReport,
   onBackToEvents,
 }: {
@@ -754,12 +767,14 @@ function EventLogDrawer({
   lifecycleState: OperationsCockpitState['batchRuntime']['lifecycleState'];
   onToggle: () => void;
   onCompleteBatch: () => void;
+  onStartNextBatch: () => void;
   onViewReport: () => void;
   onBackToEvents: () => void;
 }) {
   const latest = entries[0];
   const drawerOpen = state !== 'collapsed';
   const reportMode = state === 'report' && Boolean(report);
+  const canStartNextBatch = lifecycleState === 'completed' && Boolean(report);
 
   return (
     <aside className={`event-drawer ${state}`} aria-label="Event Log">
@@ -774,6 +789,11 @@ function EventLogDrawer({
             <Icon name="arrow_back" size="sm" />
             <span>Event List</span>
           </button>
+        ) : canStartNextBatch ? (
+          <button className="event-action-button event-action-primary" type="button" onClick={onStartNextBatch}>
+            <Icon name="play_arrow" size="sm" />
+            <span>Start Next Batch</span>
+          </button>
         ) : (
           <div className="log-filter" aria-label="Event log filters">
             <button className="active" type="button">All</button>
@@ -784,7 +804,7 @@ function EventLogDrawer({
       </div>
       {reportMode && report ? (
         <div className="event-report-detail">
-          <BatchReportInspector report={report} />
+          <BatchReportInspector report={report} onStartNextBatch={onStartNextBatch} />
         </div>
       ) : state === 'expanded' ? (
         <div className="event-list">

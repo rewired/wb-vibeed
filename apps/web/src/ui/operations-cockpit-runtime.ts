@@ -10,6 +10,7 @@ import type {
   OperationsCockpitControlSystem,
   OperationsCockpitRuntimeAction,
   OperationsCockpitRuntimeState,
+  ProgressTileState,
   RuntimeWarningKey,
   StatusLevel,
   TrendTileState,
@@ -20,6 +21,12 @@ import type {
 const MAX_EVENT_LOG_ENTRIES = 20;
 const COST_PER_KWH = 0.34;
 const NUTRIENT_REVIEW_THRESHOLD = 45;
+const NEXT_BATCH_BASELINE_STATUS = {
+  healthIndex: 70,
+  moistureBalance: 50,
+  yieldForecast: 0,
+  qualityEstimate: 70,
+} as const;
 
 export function advanceOperationsCockpitRuntime(
   state: OperationsCockpitRuntimeState,
@@ -45,6 +52,7 @@ export function advanceOperationsCockpitRuntime(
 
     return deriveOperationsCockpitRuntime({
       ...state,
+      completedBatchReports: archiveCompletedReport(state.completedBatchReports, report),
       cockpit: {
         ...state.cockpit,
         batchRuntime: {
@@ -56,6 +64,45 @@ export function advanceOperationsCockpitRuntime(
         eventLog: [event, ...state.cockpit.eventLog].slice(0, MAX_EVENT_LOG_ENTRIES),
       },
     });
+  }
+
+  if (action.type === 'start-next-batch') {
+    const report = state.cockpit.batchRuntime.report;
+
+    if (state.cockpit.batchRuntime.lifecycleState !== 'completed' || !report) return state;
+
+    const nextBatchId = incrementBatchId(state.cockpit.roomOverview.batchId);
+    const event = batchStartedEvent(state, nextBatchId);
+
+    return deriveOperationsCockpitRuntime({
+      ...state,
+      baseline: {
+        ...state.baseline,
+        batch: {
+          ...state.baseline.batch,
+          startTick: state.simulation.tick,
+        },
+      },
+      completedBatchReports: archiveCompletedReport(state.completedBatchReports, report),
+      cockpit: {
+        ...state.cockpit,
+        roomOverview: {
+          ...state.cockpit.roomOverview,
+          batchId: nextBatchId,
+        },
+        batchRuntime: {
+          batchDay: 1,
+          cycleLengthDays: state.cockpit.batchRuntime.cycleLengthDays,
+          startTick: state.simulation.tick,
+          cycleProgress: deriveCycleProgress(1, state.cockpit.batchRuntime.cycleLengthDays),
+          phase: 'Seedling',
+          lifecycleState: 'active',
+          readyForReview: false,
+        },
+        batchStatus: resetBatchStatus(state.cockpit.batchStatus),
+        eventLog: [event, ...state.cockpit.eventLog].slice(0, MAX_EVENT_LOG_ENTRIES),
+      },
+    }, { emitWarningEvents: false });
   }
 
   if (action.type === 'set-running') {
@@ -244,6 +291,28 @@ function deriveBatchLifecycleState(currentLifecycleState: BatchLifecycleState, c
   if (currentLifecycleState === 'completed') return 'completed';
   if (cycleProgress >= 100) return 'ready';
   return 'active';
+}
+
+function resetBatchStatus(items: ProgressTileState[]): ProgressTileState[] {
+  return items.map((item) => {
+    if (item.id === 'batch-health-index') {
+      return { ...item, value: NEXT_BATCH_BASELINE_STATUS.healthIndex, secondary: 'Baseline', status: 'normal' };
+    }
+
+    if (item.id === 'moisture-balance') {
+      return { ...item, value: NEXT_BATCH_BASELINE_STATUS.moistureBalance, status: 'normal' };
+    }
+
+    if (item.id === 'yield-forecast') {
+      return { ...item, value: NEXT_BATCH_BASELINE_STATUS.yieldForecast, status: 'normal' };
+    }
+
+    if (item.id === 'quality-estimate') {
+      return { ...item, value: NEXT_BATCH_BASELINE_STATUS.qualityEstimate, secondary: 'Baseline', status: 'normal' };
+    }
+
+    return { ...item, status: 'normal' };
+  });
 }
 
 function deriveTelemetry(state: OperationsCockpitRuntimeState): MetricTileState[] {
@@ -468,6 +537,41 @@ function batchCompletedEvent(state: OperationsCockpitRuntimeState): EventLogEntr
     title: 'Batch completed.',
     detail: `Batch report generated. Actual runtime ${actualDays} days.`,
   };
+}
+
+function batchStartedEvent(state: OperationsCockpitRuntimeState, batchId: string): EventLogEntryState {
+  const day = deriveGlobalDay(state.simulation.tick, state.simulation.ticksPerDay);
+  const roomId = state.cockpit.roomOverview.roomId;
+  const zoneId = state.cockpit.roomOverview.zoneId;
+
+  return {
+    id: `batch-started-${state.simulation.tick}-${batchId}`,
+    time: clockFromTick(state.simulation.tick, state.simulation.ticksPerDay),
+    day,
+    tick: state.simulation.tick,
+    severity: 'info',
+    title: 'New batch started.',
+    detail: `Batch ${batchId} started in Room ${roomId} / Zone ${zoneId}.`,
+  };
+}
+
+function archiveCompletedReport(reports: BatchReport[], report: BatchReport): BatchReport[] {
+  if (reports.some((item) => item.batchId === report.batchId && item.completedTick === report.completedTick)) {
+    return reports;
+  }
+
+  return [report, ...reports];
+}
+
+export function incrementBatchId(batchId: string): string {
+  const match = /^B-(\d+)$/.exec(batchId);
+  if (!match) return `${batchId}-NEXT`;
+
+  const numericId = match[1];
+  if (!numericId) return `${batchId}-NEXT`;
+
+  const nextNumber = Number(numericId) + 1;
+  return `B-${String(nextNumber).padStart(numericId.length, '0')}`;
 }
 
 function controlIdForSystem(system: OperationsCockpitControlSystem) {

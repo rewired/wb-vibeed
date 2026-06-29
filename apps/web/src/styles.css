@@ -695,7 +695,8 @@ button {
 .last-event,
 .report-header-block,
 .report-section,
-.report-summary-copy {
+.report-summary-copy,
+.report-action-footer {
   border: 1px solid rgba(188, 205, 198, 0.12);
   background: rgba(0, 0, 0, 0.16);
 }
@@ -951,6 +952,15 @@ button.active,
   color: #dce3e0;
   font-size: 12px;
   line-height: 1.35;
+}
+
+.report-action-footer {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 46px;
+  padding: 9px 10px;
 }
 
 .progress-bar {
@@ -1264,6 +1274,10 @@ button.active,
   line-height: 1;
   text-transform: uppercase;
   cursor: pointer;
+}
+
+.event-action-primary {
+  min-width: 176px;
 }
 
 .event-action-warning {
