@@ -44,6 +44,9 @@ export type TelemetryKey =
 export type TelemetryTileMode = 'current' | 'trend';
 export type TelemetryViewModes = Record<TelemetryKey, TelemetryTileMode>;
 export type EventLogDrawerState = 'collapsed' | 'expanded';
+export type ReportViewState =
+  | { type: 'closed' }
+  | { type: 'open'; reportKey: string };
 
 export interface SimulationRuntimeState {
   isRunning: boolean;
