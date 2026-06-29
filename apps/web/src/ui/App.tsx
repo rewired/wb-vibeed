@@ -4,6 +4,7 @@ import { rehydrateOperationsCockpit } from './operations-cockpit-rehydrate';
 import { advanceOperationsCockpitRuntime } from './operations-cockpit-runtime';
 import type {
   BatchReport,
+  BatchLifecycleState,
   ControlState,
   ControlTileState,
   EventLogDrawerState,
@@ -40,6 +41,10 @@ const initialTelemetryViewModes: TelemetryViewModes = {
   'nutrient-reservoir': 'current',
 };
 const BASE_TICK_MS = 1000;
+const MAX_VISIBLE_REPORTS = 3;
+type ReportViewState =
+  | { type: 'closed' }
+  | { type: 'open'; reportKey: string };
 
 function Icon({
   name,
@@ -80,6 +85,7 @@ export function App() {
   const [selectedObject, setSelectedObject] = useState<SelectedRoomObject>('lighting');
   const [telemetryViewModes, setTelemetryViewModes] = useState<TelemetryViewModes>(initialTelemetryViewModes);
   const [eventDrawerState, setEventDrawerState] = useState<EventLogDrawerState>('collapsed');
+  const [reportViewState, setReportViewState] = useState<ReportViewState>({ type: 'closed' });
   const runtimeState = runtime.simulation;
   const displayState = runtime.cockpit;
 
@@ -125,10 +131,17 @@ export function App() {
   function handleStartNextBatch() {
     dispatch({ type: 'start-next-batch' });
     setEventDrawerState('expanded');
+    setReportViewState({ type: 'closed' });
   }
 
   function handleSelectObject(object: SelectedRoomObject) {
     setSelectedObject(object);
+    if (object !== 'canopy') setReportViewState({ type: 'closed' });
+  }
+
+  function handleViewBatchReport(report: BatchReport) {
+    setSelectedObject('canopy');
+    setReportViewState({ type: 'open', reportKey: reportKey(report) });
   }
 
   return (
@@ -147,9 +160,15 @@ export function App() {
           <RoomAssetsList state={displayState} selectedObject={selectedObject} onSelect={handleSelectObject} />
           <ObjectInspector
             state={displayState}
+            completedReports={runtime.completedBatchReports}
             selectedObject={selectedObject}
             onModeChange={handleControlModeChange}
             onControlChange={handleControlStateChange}
+            reportViewState={reportViewState}
+            onCompleteBatch={handleCompleteBatch}
+            onStartNextBatch={handleStartNextBatch}
+            onViewReport={handleViewBatchReport}
+            onBackToCanopy={() => setReportViewState({ type: 'closed' })}
           />
           <EnvironmentalTelemetry
             items={displayState.environmentalTelemetry}
@@ -163,13 +182,7 @@ export function App() {
       <EventLogDrawer
         state={eventDrawerState}
         entries={displayState.eventLog}
-        report={displayState.batchRuntime.report}
-        lifecycleState={displayState.batchRuntime.lifecycleState}
         onToggle={toggleEventDrawer}
-        onCompleteBatch={handleCompleteBatch}
-        onStartNextBatch={handleStartNextBatch}
-        onViewReport={() => setEventDrawerState('report')}
-        onBackToEvents={() => setEventDrawerState('expanded')}
       />
     </main>
   );
@@ -390,14 +403,26 @@ function RoomAssetsList({
 
 function ObjectInspector({
   state,
+  completedReports,
   selectedObject,
   onModeChange,
   onControlChange,
+  reportViewState,
+  onCompleteBatch,
+  onStartNextBatch,
+  onViewReport,
+  onBackToCanopy,
 }: {
   state: OperationsCockpitState;
+  completedReports: BatchReport[];
   selectedObject: SelectedRoomObject;
   onModeChange: (controlId: string, mode: OperatingMode) => void;
   onControlChange: (controlId: string, controlValue: ControlState) => void;
+  reportViewState: ReportViewState;
+  onCompleteBatch: () => void;
+  onStartNextBatch: () => void;
+  onViewReport: (report: BatchReport) => void;
+  onBackToCanopy: () => void;
 }) {
   const details = inspectorHeader(state, selectedObject);
 
@@ -413,9 +438,15 @@ function ObjectInspector({
         </div>
         <InspectorContent
           state={state}
+          completedReports={completedReports}
           selectedObject={selectedObject}
           onModeChange={onModeChange}
           onControlChange={onControlChange}
+          reportViewState={reportViewState}
+          onCompleteBatch={onCompleteBatch}
+          onStartNextBatch={onStartNextBatch}
+          onViewReport={onViewReport}
+          onBackToCanopy={onBackToCanopy}
         />
       </div>
     </Panel>
@@ -424,14 +455,26 @@ function ObjectInspector({
 
 function InspectorContent({
   state,
+  completedReports,
   selectedObject,
   onModeChange,
   onControlChange,
+  reportViewState,
+  onCompleteBatch,
+  onStartNextBatch,
+  onViewReport,
+  onBackToCanopy,
 }: {
   state: OperationsCockpitState;
+  completedReports: BatchReport[];
   selectedObject: SelectedRoomObject;
   onModeChange: (controlId: string, mode: OperatingMode) => void;
   onControlChange: (controlId: string, controlValue: ControlState) => void;
+  reportViewState: ReportViewState;
+  onCompleteBatch: () => void;
+  onStartNextBatch: () => void;
+  onViewReport: (report: BatchReport) => void;
+  onBackToCanopy: () => void;
 }) {
   if (selectedObject === 'lighting') {
     return (
@@ -476,20 +519,42 @@ function InspectorContent({
     );
   }
   if (selectedObject === 'nutrient') return <NutrientInspector state={state} />;
-  if (selectedObject === 'canopy') return <CanopyInspector state={state} />;
+  if (selectedObject === 'canopy') {
+    return (
+      <CanopyInspector
+        state={state}
+        completedReports={completedReports}
+        reportViewState={reportViewState}
+        onCompleteBatch={onCompleteBatch}
+        onStartNextBatch={onStartNextBatch}
+        onViewReport={onViewReport}
+        onBackToCanopy={onBackToCanopy}
+      />
+    );
+  }
   if (selectedObject === 'sensors') return <SensorsInspector state={state} />;
   return <ExhaustInspector state={state} />;
 }
 
-function BatchReportInspector({ report, onStartNextBatch }: { report: BatchReport; onStartNextBatch: () => void }) {
+function BatchReportInspector({
+  report,
+  canStartNextBatch,
+  onStartNextBatch,
+  onBack,
+}: {
+  report: BatchReport;
+  canStartNextBatch: boolean;
+  onStartNextBatch: () => void;
+  onBack: () => void;
+}) {
   return (
     <div className="batch-report-view">
       <section className="report-header-block">
         <div>
-          <span className="label">Batch Report</span>
+          <span className="label">Report Header</span>
           <strong>Batch {report.batchId}</strong>
           <small>{report.roomId} / {report.zoneId}</small>
-          <small>Completed Global Day {report.completedDay} / Tick {report.completedTick}</small>
+          <small>Completed Day {report.completedDay} / Tick {report.completedTick}</small>
         </div>
         <b className={`status-pill status-${report.finalStatus}`}>Final Status: {titleCase(report.finalStatus)}</b>
       </section>
@@ -503,7 +568,7 @@ function BatchReportInspector({ report, onStartNextBatch }: { report: BatchRepor
         ]}
       />
       <ReportSection
-        title="Operations"
+        title="Operational Summary"
         rows={[
           ['Warning Count', String(report.warningCount)],
           ['Efficiency Score', `${report.efficiencyScore} score`],
@@ -512,7 +577,7 @@ function BatchReportInspector({ report, onStartNextBatch }: { report: BatchRepor
         ]}
       />
       <ReportSection
-        title="Cost"
+        title="Cost Summary"
         rows={[
           ['Total Energy', `${report.totalEnergyKwh.toLocaleString('en-US')} kWh`],
           ['Total Cost', formatValue(report.totalCost, '$')],
@@ -523,10 +588,16 @@ function BatchReportInspector({ report, onStartNextBatch }: { report: BatchRepor
         <strong>{report.summary}</strong>
       </article>
       <footer className="report-action-footer">
-        <button className="event-action-button event-action-primary" type="button" onClick={onStartNextBatch}>
-          <Icon name="play_arrow" size="sm" />
-          <span>Start Next Batch</span>
+        <button className="lifecycle-action-button" type="button" onClick={onBack}>
+          <Icon name="arrow_back" size="sm" />
+          <span>Back to Canopy / Plants</span>
         </button>
+        {canStartNextBatch ? (
+          <button className="lifecycle-action-button lifecycle-action-primary" type="button" onClick={onStartNextBatch}>
+            <Icon name="play_arrow" size="sm" />
+            <span>Start Next Batch</span>
+          </button>
+        ) : null}
       </footer>
     </div>
   );
@@ -618,20 +689,198 @@ function NutrientInspector({ state }: { state: OperationsCockpitState }) {
   );
 }
 
-function CanopyInspector({ state }: { state: OperationsCockpitState }) {
+function CanopyInspector({
+  state,
+  completedReports,
+  reportViewState,
+  onCompleteBatch,
+  onStartNextBatch,
+  onViewReport,
+  onBackToCanopy,
+}: {
+  state: OperationsCockpitState;
+  completedReports: BatchReport[];
+  reportViewState: ReportViewState;
+  onCompleteBatch: () => void;
+  onStartNextBatch: () => void;
+  onViewReport: (report: BatchReport) => void;
+  onBackToCanopy: () => void;
+}) {
   const canopy = capacityById(state.roomOverview.capacity, 'canopy-tables');
+  const runtime = state.batchRuntime;
+  const report = runtime.report;
+  const lifecycleStatus = lifecycleStatusLevel(runtime.lifecycleState, report);
+  const selectedReport = reportViewState.type === 'open'
+    ? reportByKey(completedReports, reportViewState.reportKey) ?? (report && reportKey(report) === reportViewState.reportKey ? report : undefined)
+    : undefined;
+  const canStartFromSelectedReport = Boolean(
+    selectedReport
+    && report
+    && reportKey(selectedReport) === reportKey(report)
+    && runtime.lifecycleState === 'completed',
+  );
+
+  if (selectedReport) {
+    return (
+      <BatchReportInspector
+        report={selectedReport}
+        canStartNextBatch={canStartFromSelectedReport}
+        onStartNextBatch={onStartNextBatch}
+        onBack={onBackToCanopy}
+      />
+    );
+  }
 
   return (
-    <div className="inspector-stack">
-      <InspectorFacts
-        facts={[
-          ['Status', 'Monitored'],
-          ['Tables Active', `${canopy?.active ?? 0} active`],
-          ['Batch Reference', state.roomOverview.batchId],
-          ['Plant Detail Model', 'Not available in Iteration 1'],
-        ]}
-      />
+    <div className="inspector-stack canopy-workspace">
+      <section className="canopy-batch-overview" aria-label="Current batch">
+        <article>
+          <span className="label">Current Batch</span>
+          <strong>{state.roomOverview.batchId}</strong>
+          <small>{state.roomOverview.roomId} / {state.roomOverview.zoneId}</small>
+        </article>
+        <article>
+          <span className="label">Batch Day</span>
+          <strong>{runtime.batchDay} of {runtime.cycleLengthDays}</strong>
+          <small>{canopy?.active ?? 0} canopy tables active</small>
+        </article>
+        <article>
+          <span className="label">Phase</span>
+          <strong>{runtime.phase}</strong>
+          <small>{lifecycleStateLabel(runtime.lifecycleState)}</small>
+        </article>
+        <article className={`status-${lifecycleStatus}`}>
+          <span className="label">Cycle Progress</span>
+          <strong>{runtime.cycleProgress}%</strong>
+          <ProgressBar value={runtime.cycleProgress} />
+        </article>
+      </section>
+
+      <section className={`lifecycle-panel status-${lifecycleStatus}`} aria-label="Batch lifecycle actions">
+        <div className="lifecycle-panel-header">
+          <div>
+            <span className="label">Batch Lifecycle</span>
+            <strong>{lifecycleStateLabel(runtime.lifecycleState)}</strong>
+          </div>
+          <b className={`status-pill status-${lifecycleStatus}`}>{lifecycleStateLabel(runtime.lifecycleState)}</b>
+        </div>
+        <InspectorFacts
+          facts={[
+            ['Current Batch', state.roomOverview.batchId],
+            ['State', lifecycleStateLabel(runtime.lifecycleState)],
+            ['Phase', runtime.phase],
+            ['Batch Day', `${runtime.batchDay} of ${runtime.cycleLengthDays}`],
+            ['Report', report ? 'Available' : 'Not available'],
+          ]}
+        />
+        <div className="lifecycle-actions">
+          {runtime.lifecycleState === 'active' ? (
+            <>
+              <button className="lifecycle-action-button lifecycle-action-disabled" type="button" disabled>
+                <Icon name="play_arrow" size="sm" />
+                <span>Start Next Batch</span>
+              </button>
+              <small>Current batch must be completed first.</small>
+            </>
+          ) : runtime.lifecycleState === 'ready' ? (
+            <button className="lifecycle-action-button lifecycle-action-warning" type="button" onClick={onCompleteBatch}>
+              <Icon name="task_alt" size="sm" />
+              <span>Complete Batch</span>
+            </button>
+          ) : (
+            <>
+              <button
+                className="lifecycle-action-button"
+                type="button"
+                onClick={() => {
+                  if (report) onViewReport(report);
+                }}
+                disabled={!report}
+              >
+                <Icon name="article" size="sm" />
+                <span>View Report</span>
+              </button>
+              <button className="lifecycle-action-button lifecycle-action-primary" type="button" onClick={onStartNextBatch} disabled={!report}>
+                <Icon name="play_arrow" size="sm" />
+                <span>Start Next Batch</span>
+              </button>
+            </>
+          )}
+        </div>
+      </section>
+
+      <RecentBatchReports reports={completedReports.slice(0, MAX_VISIBLE_REPORTS)} onViewReport={onViewReport} />
+
+      {runtime.lifecycleState === 'completed' && report ? (
+        <section className="canopy-report-summary" aria-label="Batch report summary">
+          <div>
+            <span className="label">Report Available</span>
+            <strong>Batch {report.batchId}</strong>
+          </div>
+          <dl>
+            <div>
+              <dt>Final Status</dt>
+              <dd className={`status-text status-${report.finalStatus}`}>{titleCase(report.finalStatus)}</dd>
+            </div>
+            <div>
+              <dt>Yield Estimate</dt>
+              <dd>{report.finalYieldEstimate} units</dd>
+            </div>
+            <div>
+              <dt>Quality Estimate</dt>
+              <dd>{report.finalQualityEstimate}%</dd>
+            </div>
+          </dl>
+        </section>
+      ) : null}
+
+      <LastEvent event={lastEventForObject(state.eventLog, 'canopy', 'No recent canopy lifecycle event')} />
     </div>
+  );
+}
+
+function RecentBatchReports({
+  reports,
+  onViewReport,
+}: {
+  reports: BatchReport[];
+  onViewReport: (report: BatchReport) => void;
+}) {
+  return (
+    <section className="recent-reports-panel" aria-label="Recent batch reports">
+      <div className="recent-reports-header">
+        <span className="label">Recent Batch Reports</span>
+        <strong>{reports.length > 0 ? `${reports.length} shown` : 'No reports'}</strong>
+      </div>
+      {reports.length > 0 ? (
+        <div className="recent-report-list">
+          {reports.map((report) => (
+            <article className="recent-report-row" key={reportKey(report)}>
+              <div>
+                <strong>{report.batchId}</strong>
+                <small>Completed Day {report.completedDay}</small>
+              </div>
+              <dl>
+                <div>
+                  <dt>Final Status</dt>
+                  <dd className={`status-text status-${report.finalStatus}`}>{titleCase(report.finalStatus)}</dd>
+                </div>
+                <div>
+                  <dt>Quality</dt>
+                  <dd>{report.finalQualityEstimate}%</dd>
+                </div>
+              </dl>
+              <button className="report-row-action" type="button" onClick={() => onViewReport(report)}>
+                <Icon name="article" size="sm" />
+                <span>View</span>
+              </button>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p>No completed batch reports yet.</p>
+      )}
+    </section>
   );
 }
 
@@ -753,28 +1002,14 @@ function EnvironmentalTelemetry({
 function EventLogDrawer({
   state,
   entries,
-  report,
-  lifecycleState,
   onToggle,
-  onCompleteBatch,
-  onStartNextBatch,
-  onViewReport,
-  onBackToEvents,
 }: {
   state: EventLogDrawerState;
   entries: EventLogEntryState[];
-  report: BatchReport | undefined;
-  lifecycleState: OperationsCockpitState['batchRuntime']['lifecycleState'];
   onToggle: () => void;
-  onCompleteBatch: () => void;
-  onStartNextBatch: () => void;
-  onViewReport: () => void;
-  onBackToEvents: () => void;
 }) {
   const latest = entries[0];
   const drawerOpen = state !== 'collapsed';
-  const reportMode = state === 'report' && Boolean(report);
-  const canStartNextBatch = lifecycleState === 'completed' && Boolean(report);
 
   return (
     <aside className={`event-drawer ${state}`} aria-label="Event Log">
@@ -783,41 +1018,16 @@ function EventLogDrawer({
           <Icon name={drawerOpen ? 'keyboard_arrow_down' : 'keyboard_arrow_up'} size="sm" />
           <span>Event Log</span>
         </button>
-        <strong>{reportMode ? 'Batch Report' : latest?.title ?? 'No events logged'}</strong>
-        {reportMode ? (
-          <button className="event-back-button" type="button" onClick={onBackToEvents}>
-            <Icon name="arrow_back" size="sm" />
-            <span>Event List</span>
-          </button>
-        ) : canStartNextBatch ? (
-          <button className="event-action-button event-action-primary" type="button" onClick={onStartNextBatch}>
-            <Icon name="play_arrow" size="sm" />
-            <span>Start Next Batch</span>
-          </button>
-        ) : (
-          <div className="log-filter" aria-label="Event log filters">
-            <button className="active" type="button">All</button>
-            <button type="button">Alerts</button>
-            <button type="button">Info</button>
-          </div>
-        )}
-      </div>
-      {reportMode && report ? (
-        <div className="event-report-detail">
-          <BatchReportInspector report={report} onStartNextBatch={onStartNextBatch} />
+        <strong>{latest?.title ?? 'No events logged'}</strong>
+        <div className="log-filter" aria-label="Event log filters">
+          <button className="active" type="button">All</button>
+          <button type="button">Alerts</button>
+          <button type="button">Info</button>
         </div>
-      ) : state === 'expanded' ? (
+      </div>
+      {state === 'expanded' ? (
         <div className="event-list">
-          {entries.map((entry) => (
-            <EventRow
-              key={entry.id}
-              entry={entry}
-              lifecycleState={lifecycleState}
-              hasReport={Boolean(report)}
-              onCompleteBatch={onCompleteBatch}
-              onViewReport={onViewReport}
-            />
-          ))}
+          {entries.map((entry) => <EventRow key={entry.id} entry={entry} />)}
         </div>
       ) : null}
     </aside>
@@ -960,24 +1170,9 @@ function Gauge({ value }: { value: string | number }) {
   );
 }
 
-function EventRow({
-  entry,
-  lifecycleState,
-  hasReport,
-  onCompleteBatch,
-  onViewReport,
-}: {
-  entry: EventLogEntryState;
-  lifecycleState: OperationsCockpitState['batchRuntime']['lifecycleState'];
-  hasReport: boolean;
-  onCompleteBatch: () => void;
-  onViewReport: () => void;
-}) {
-  const showCompleteAction = lifecycleState === 'ready' && isHarvestReadyEvent(entry);
-  const showReportAction = hasReport && isBatchCompletedEvent(entry);
-
+function EventRow({ entry }: { entry: EventLogEntryState }) {
   return (
-    <article className={`event-row severity-${entry.severity} ${showCompleteAction || showReportAction ? 'event-row-actionable' : ''}`}>
+    <article className={`event-row severity-${entry.severity}`}>
       <div className="event-time">
         <strong>{entry.time}</strong>
         <span>Day {entry.day} / Tick {entry.tick}</span>
@@ -987,19 +1182,7 @@ function EventRow({
         <strong>{entry.title}</strong>
         {entry.detail ? <span>{entry.detail}</span> : null}
       </div>
-      {showCompleteAction ? (
-        <button className="event-action-button event-action-warning" type="button" onClick={onCompleteBatch}>
-          <Icon name="task_alt" size="sm" />
-          <span>Complete Batch</span>
-        </button>
-      ) : showReportAction ? (
-        <button className="event-action-button" type="button" onClick={onViewReport}>
-          <Icon name="article" size="sm" />
-          <span>View Report</span>
-        </button>
-      ) : (
-        <span className="event-tag">{entry.severity}</span>
-      )}
+      <span className="event-tag">{entry.severity}</span>
     </article>
   );
 }
@@ -1158,6 +1341,30 @@ function batchCycleSummary(state: OperationsCockpitState) {
   };
 }
 
+function lifecycleStateLabel(state: BatchLifecycleState) {
+  const labels: Record<BatchLifecycleState, string> = {
+    active: 'Active',
+    ready: 'Harvest Ready',
+    completed: 'Completed',
+  };
+
+  return labels[state];
+}
+
+function lifecycleStatusLevel(state: BatchLifecycleState, report?: BatchReport): StatusLevel {
+  if (state === 'ready') return 'warning';
+  if (state === 'completed') return report?.finalStatus ?? 'normal';
+  return 'normal';
+}
+
+function reportKey(report: BatchReport) {
+  return `${report.batchId}-${report.completedTick}`;
+}
+
+function reportByKey(reports: BatchReport[], key: string) {
+  return reports.find((report) => reportKey(report) === key);
+}
+
 function formatInspectorValue(tuning?: ControlTileState['primaryTuning']) {
   if (!tuning) return 'Nominal';
   return formatValue(tuning.value, tuning.unit);
@@ -1312,14 +1519,6 @@ function severityIcon(severity: EventLogEntryState['severity'] | 'maintenance') 
     maintenance: 'build',
   };
   return icons[severity] ?? 'info';
-}
-
-function isHarvestReadyEvent(entry: EventLogEntryState) {
-  return entry.title === 'Batch harvest-ready.';
-}
-
-function isBatchCompletedEvent(entry: EventLogEntryState) {
-  return entry.title === 'Batch completed.';
 }
 
 function clamp(value: number, min: number, max: number) {
