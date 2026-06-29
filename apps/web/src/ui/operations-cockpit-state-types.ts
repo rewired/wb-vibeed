@@ -18,6 +18,17 @@ export type SeverityLevel = EventSeverity;
 export type OperatingMode = 'Eco' | 'Balanced' | 'Push';
 export type ControlState = 'Auto' | 'Manual';
 export type SimSpeed = 1 | 2 | 4 | 8;
+export type SelectedRoomObject =
+  | 'batch'
+  | 'canopy'
+  | 'lighting'
+  | 'climate'
+  | 'irrigation'
+  | 'nutrient'
+  | 'sensors'
+  | 'exhaust';
+export type TelemetryPanelMode = 'current' | 'trends';
+export type EventLogDrawerState = 'collapsed' | 'expanded';
 
 export interface SimulationRuntimeState {
   isRunning: boolean;
@@ -123,6 +134,9 @@ export interface RoomCapacityItemState {
   label: string;
   value: string;
   icon: string;
+  active?: number;
+  online?: number;
+  total: number;
 }
 
 export interface RoomInventoryItemState {

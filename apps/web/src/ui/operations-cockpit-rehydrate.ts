@@ -17,7 +17,7 @@ export function rehydrateOperationsCockpit(
 
   const day = dayFromTick(blueprint.simulation.initialTick, blueprint.simulation.ticksPerDay);
   const cycleProgress = cycleProgressFromDay(day, blueprint.batch.cycleLengthDays);
-  const statusLabel = titleCase(blueprint.batch.status);
+  const statusLabel = titleCase(blueprint.room.status);
   const telemetry = blueprint.telemetryBase;
 
   return {
@@ -171,24 +171,48 @@ function rehydrateCapacity(capacity: OperationsCockpitBlueprint['capacity']): Ro
       label: 'Canopy Tables',
       value: `${capacity.canopyTables.active ?? 0} / ${capacity.canopyTables.total} Active`,
       icon: 'table_rows',
+      active: capacity.canopyTables.active ?? 0,
+      total: capacity.canopyTables.total,
     },
     {
       id: 'light-rails',
       label: 'Light Rails',
       value: `${capacity.lightRails.online ?? 0} Online`,
       icon: 'lightbulb',
+      online: capacity.lightRails.online ?? 0,
+      total: capacity.lightRails.total,
     },
     {
       id: 'circulation-fans',
       label: 'Circulation Fans',
       value: `${capacity.circulationFans.online ?? 0} Online`,
       icon: 'mode_fan',
+      online: capacity.circulationFans.online ?? 0,
+      total: capacity.circulationFans.total,
     },
     {
       id: 'sensor-points',
       label: 'Sensor Points',
       value: `${capacity.sensorPoints.online ?? 0} Online`,
       icon: 'sensors',
+      online: capacity.sensorPoints.online ?? 0,
+      total: capacity.sensorPoints.total,
+    },
+    {
+      id: 'nutrient-reservoirs',
+      label: 'Nutrient Reservoirs',
+      value: `${capacity.nutrientReservoirs.online ?? 0} Online`,
+      icon: 'science',
+      online: capacity.nutrientReservoirs.online ?? 0,
+      total: capacity.nutrientReservoirs.total,
+    },
+    {
+      id: 'exhaust-filters',
+      label: 'Exhaust Filters',
+      value: `${capacity.exhaustFilters.online ?? 0} Online`,
+      icon: 'filter_alt',
+      online: capacity.exhaustFilters.online ?? 0,
+      total: capacity.exhaustFilters.total,
     },
   ];
 }
@@ -370,8 +394,8 @@ function titleCase(value: string) {
 }
 
 function targetFromMode(mode: OperationsCockpitBlueprint['controls']['light']['mode']) {
-  if (mode === 'Eco') return 'Reduced';
-  if (mode === 'Push') return 'Elevated';
+  if (mode === 'Eco') return 'Eco';
+  if (mode === 'Push') return 'Push';
   return 'Nominal';
 }
 

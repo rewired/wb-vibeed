@@ -301,7 +301,7 @@ function slug(value: string) {
 }
 
 function targetFromMode(mode: OperatingMode) {
-  if (mode === 'Eco') return 'Reduced';
-  if (mode === 'Push') return 'Elevated';
+  if (mode === 'Eco') return 'Eco';
+  if (mode === 'Push') return 'Push';
   return 'Nominal';
 }
