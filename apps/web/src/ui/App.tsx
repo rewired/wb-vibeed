@@ -28,7 +28,6 @@ import type {
 const initialRuntimeState = rehydrateOperationsCockpit(blueprintData as OperationsCockpitBlueprint);
 const modeOptions = ['Eco', 'Balanced', 'Push'] as const;
 const controlOptions = ['Auto', 'Manual'] as const;
-const telemetryModeOptions = ['current', 'trend'] as const satisfies readonly TelemetryTileMode[];
 const speedOptions = [1, 2, 4, 8] as const satisfies readonly SimSpeed[];
 const initialTelemetryViewModes: TelemetryViewModes = {
   'air-temperature': 'current',
@@ -340,12 +339,15 @@ function RoomAssetsList({
             aria-pressed={selectedObject === asset.id}
             onClick={() => onSelect(asset.id)}
           >
-            <Icon name={asset.icon} size="sm" />
+            <Icon name={asset.icon} size="lg" className="asset-kind-icon" />
             <span>
               <strong>{asset.name}</strong>
               <small>{asset.secondary}</small>
             </span>
-            <b className={`status-text status-${asset.statusLevel}`}>{asset.status}</b>
+            <span className={`asset-status status-${asset.statusLevel}`} aria-label={`Status: ${asset.status}`} title={asset.status}>
+              <Icon name={asset.statusIcon} size="md" filled />
+              <small>{asset.statusShort}</small>
+            </span>
           </button>
         ))}
       </div>
@@ -370,7 +372,6 @@ function ObjectInspector({
     <Panel className="object-inspector" title="Selected Object Inspector">
       <div className="inspector-shell">
         <div className="inspector-heading">
-          <Icon name={details.icon} size="lg" />
           <div>
             <span className="label">Selected Object</span>
             <strong>{details.name}</strong>
@@ -714,26 +715,35 @@ function MetricTile({
   trend: TrendTileState | undefined;
   onModeChange: (mode: TelemetryTileMode) => void;
 }) {
+  const isTrendMode = mode === 'trend' && Boolean(trend);
+  const displayedValue = isTrendMode && trend ? formatValue(trend.currentValue, trend.unit) : formatValue(item.value, item.unit);
+  const nextMode: TelemetryTileMode = isTrendMode ? 'current' : 'trend';
+
   return (
-    <article className={`metric-tile status-${item.status}`}>
+    <article className={`metric-tile metric-mode-${isTrendMode ? 'trend' : 'current'} status-${item.status}`}>
       <div className="metric-tile-header">
         <span className="label">{item.label}</span>
-        <SegmentedControl items={telemetryModeOptions} active={mode} onChange={onModeChange} />
+        <button
+          className={isTrendMode ? 'metric-mode-toggle active' : 'metric-mode-toggle'}
+          type="button"
+          aria-label={isTrendMode ? 'Show current value' : 'Show trend'}
+          aria-pressed={isTrendMode}
+          onClick={() => onModeChange(nextMode)}
+        >
+          <Icon name="show_chart" size="sm" />
+        </button>
       </div>
-      {mode === 'trend' && trend ? (
-        <div className="metric-trend">
-          <strong>{formatValue(trend.currentValue, trend.unit)}</strong>
-          <Sparkline points={trend.points} />
+      <div className="metric-body">
+        <strong>{displayedValue}</strong>
+        <small>{item.reference ?? '\u00a0'}</small>
+        <div className="metric-visual">
+          {isTrendMode && trend ? (
+            <Sparkline points={trend.points} />
+          ) : (
+            <Gauge value={metricPercent(item)} />
+          )}
         </div>
-      ) : (
-        <div className="metric-current">
-          <strong>{formatValue(item.value, item.unit)}</strong>
-          {item.reference ? <small>{item.reference}</small> : null}
-          <div className="gauge" aria-hidden="true">
-            <span style={{ '--gauge-value': metricPercent(item) } as CSSProperties} />
-          </div>
-        </div>
-      )}
+      </div>
     </article>
   );
 }
@@ -797,6 +807,17 @@ function Sparkline({ points }: { points: number[] }) {
   );
 }
 
+function Gauge({ value }: { value: string | number }) {
+  const percent = typeof value === 'number' ? value : Number.parseFloat(value);
+  const gaugeAngle = Number.isFinite(percent) ? `${clamp(percent, 0, 100) * 1.8}deg` : '117deg';
+
+  return (
+    <div className="gauge" aria-hidden="true" style={{ '--gauge-angle': gaugeAngle } as CSSProperties}>
+      <span />
+    </div>
+  );
+}
+
 function EventRow({ entry }: { entry: EventLogEntryState }) {
   return (
     <article className={`event-row severity-${entry.severity}`}>
@@ -834,10 +855,12 @@ function roomAssets(state: OperationsCockpitState) {
   return [
     {
       id: 'canopy',
-      icon: 'table_rows',
+      icon: 'yard',
       name: 'Canopy / Plants',
       secondary: `${canopy?.active ?? 0} tables active`,
       status: 'Monitored',
+      statusShort: 'Watch',
+      statusIcon: 'visibility',
       statusLevel: 'normal',
     },
     {
@@ -846,6 +869,8 @@ function roomAssets(state: OperationsCockpitState) {
       name: 'Lighting System',
       secondary: controlMode(lighting),
       status: 'Online',
+      statusShort: 'Online',
+      statusIcon: 'check_circle',
       statusLevel: 'normal',
     },
     {
@@ -854,6 +879,8 @@ function roomAssets(state: OperationsCockpitState) {
       name: 'Climate System',
       secondary: controlMode(climate),
       status: 'Online',
+      statusShort: 'Online',
+      statusIcon: 'check_circle',
       statusLevel: 'normal',
     },
     {
@@ -862,6 +889,8 @@ function roomAssets(state: OperationsCockpitState) {
       name: 'Irrigation System',
       secondary: controlMode(irrigation),
       status: 'Online',
+      statusShort: 'Online',
+      statusIcon: 'check_circle',
       statusLevel: 'normal',
     },
     {
@@ -870,6 +899,8 @@ function roomAssets(state: OperationsCockpitState) {
       name: 'Nutrient System',
       secondary: 'Reservoir Connected',
       status: 'Online',
+      statusShort: 'Online',
+      statusIcon: 'check_circle',
       statusLevel: 'normal',
     },
     {
@@ -878,6 +909,8 @@ function roomAssets(state: OperationsCockpitState) {
       name: 'Sensor Network',
       secondary: `${sensors?.online ?? 0} points online`,
       status: titleCase(state.roomOverview.status),
+      statusShort: statusShortLabel(state.roomOverview.status),
+      statusIcon: statusIcon(state.roomOverview.status),
       statusLevel: state.roomOverview.status,
     },
     {
@@ -886,6 +919,8 @@ function roomAssets(state: OperationsCockpitState) {
       name: 'Exhaust / Filtration',
       secondary: 'Maintenance due',
       status: 'Maintenance Due',
+      statusShort: 'Due',
+      statusIcon: 'build_circle',
       statusLevel: 'warning',
     },
   ] as const satisfies readonly {
@@ -894,6 +929,8 @@ function roomAssets(state: OperationsCockpitState) {
     name: string;
     secondary: string;
     status: string;
+    statusShort: string;
+    statusIcon: string;
     statusLevel: 'normal' | 'warning' | 'critical';
   }[];
 }
@@ -901,7 +938,6 @@ function roomAssets(state: OperationsCockpitState) {
 function inspectorHeader(state: OperationsCockpitState, selectedObject: SelectedRoomObject) {
   const asset = roomAssets(state).find((item) => item.id === selectedObject) ?? roomAssets(state)[0];
   return {
-    icon: asset.icon,
     name: asset.name,
     status: asset.status,
     statusLevel: asset.statusLevel,
@@ -996,6 +1032,24 @@ function metricPercent(item: MetricTileState) {
   if (item.unit === 'Â°C') return `${clamp((item.value / 35) * 100, 0, 100)}%`;
   if (item.unit === 'ppm') return `${clamp((item.value / 1600) * 100, 0, 100)}%`;
   return `${clamp(item.value, 0, 100)}%`;
+}
+
+function statusIcon(status: StatusLevel) {
+  const icons: Record<StatusLevel, string> = {
+    normal: 'check_circle',
+    warning: 'warning',
+    critical: 'error',
+  };
+  return icons[status];
+}
+
+function statusShortLabel(status: StatusLevel) {
+  const labels: Record<StatusLevel, string> = {
+    normal: 'Online',
+    warning: 'Warn',
+    critical: 'Critical',
+  };
+  return labels[status];
 }
 
 function trendIdForMetric(id: TelemetryKey): TrendTileState['id'] {

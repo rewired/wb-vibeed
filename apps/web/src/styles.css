@@ -159,19 +159,22 @@ button {
 
 .status-normal strong,
 .status-normal.status-text,
-.status-normal.status-pill {
+.status-normal.status-pill,
+.asset-status.status-normal {
   color: var(--green);
 }
 
 .status-warning strong,
 .status-warning.status-text,
-.status-warning.status-pill {
+.status-warning.status-pill,
+.asset-status.status-warning {
   color: var(--amber);
 }
 
 .status-critical strong,
 .status-critical.status-text,
-.status-critical.status-pill {
+.status-critical.status-pill,
+.asset-status.status-critical {
   color: var(--red);
 }
 
@@ -505,7 +508,7 @@ button {
 
 .asset-row {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) 94px;
+  grid-template-columns: 32px minmax(0, 1fr) 68px;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -551,6 +554,35 @@ button {
   white-space: nowrap;
 }
 
+.asset-kind-icon {
+  justify-self: center;
+  color: #c9d4cf;
+  font-size: 24px;
+}
+
+.asset-status {
+  display: inline-grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  justify-self: end;
+  gap: 4px;
+  min-width: 0;
+  width: 68px;
+  padding: 3px 5px;
+  border: 1px solid currentColor;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.asset-status small {
+  overflow: hidden;
+  color: currentColor;
+  font-size: 9px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .asset-row b {
   justify-self: end;
   overflow: hidden;
@@ -572,7 +604,7 @@ button {
 
 .inspector-heading {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   min-width: 0;
@@ -820,17 +852,29 @@ button.active,
 
 .metric-tile-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 86px;
+  grid-template-columns: minmax(0, 1fr) 24px;
   align-items: center;
   gap: 6px;
   min-width: 0;
 }
 
-.metric-tile-header .segmented-control button {
-  min-height: 18px;
-  padding: 2px 3px;
-  font-size: 9px;
-  letter-spacing: 0.04em;
+.metric-mode-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  border: 1px solid rgba(188, 205, 198, 0.16);
+  color: #82908b;
+  background: rgba(5, 8, 9, 0.46);
+  cursor: pointer;
+}
+
+.metric-mode-toggle.active {
+  border-color: rgba(120, 185, 75, 0.62);
+  color: #d9efd0;
+  background: var(--green-dim);
+  box-shadow: inset 0 0 0 1px rgba(120, 185, 75, 0.22);
 }
 
 .metric-tile .label {
@@ -840,20 +884,19 @@ button.active,
   white-space: nowrap;
 }
 
-.metric-current {
+.metric-body {
   display: grid;
-  align-content: start;
+  grid-template-rows: 20px 14px minmax(0, 1fr);
   justify-items: start;
   gap: 4px;
   min-height: 0;
   text-align: left;
 }
 
-.metric-trend {
+.metric-visual {
   display: grid;
-  grid-template-rows: 20px 1fr;
-  align-items: center;
-  gap: 3px;
+  place-items: end start;
+  width: 100%;
   min-height: 0;
 }
 
@@ -868,26 +911,47 @@ button.active,
 
 .gauge {
   position: relative;
-  width: 100%;
-  height: 5px;
+  width: min(112px, 100%);
+  height: 48px;
   overflow: hidden;
-  background: rgba(188, 205, 198, 0.12);
+  border-radius: 112px 112px 0 0;
+  background:
+    conic-gradient(from 270deg at 50% 100%, var(--green) 0 var(--gauge-angle), rgba(188, 205, 198, 0.13) var(--gauge-angle) 180deg, transparent 180deg 360deg);
 }
 
-.gauge span {
+.gauge::before {
   content: "";
   position: absolute;
-  inset: 0;
+  right: 12px;
+  bottom: -2px;
+  left: 12px;
+  height: 36px;
+  border-radius: 90px 90px 0 0;
+  background: #0b1113;
 }
 
 .gauge span {
-  background: var(--green);
-  clip-path: polygon(0 0, var(--gauge-value) 0, var(--gauge-value) 100%, 0 100%);
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 1px;
+  background: rgba(216, 222, 219, 0.28);
+}
+
+.status-warning .gauge {
+  background:
+    conic-gradient(from 270deg at 50% 100%, var(--amber) 0 var(--gauge-angle), rgba(188, 205, 198, 0.13) var(--gauge-angle) 180deg, transparent 180deg 360deg);
+}
+
+.status-critical .gauge {
+  background:
+    conic-gradient(from 270deg at 50% 100%, var(--red) 0 var(--gauge-angle), rgba(188, 205, 198, 0.13) var(--gauge-angle) 180deg, transparent 180deg 360deg);
 }
 
 .sparkline {
   width: 100%;
-  height: 42px;
+  height: 72px;
 }
 
 .sparkline-grid {
