@@ -149,10 +149,12 @@ export interface OperationsCockpitState {
     title: string;
     roomId: string;
     zoneId: string;
+    batchId: string;
+    phase: string;
+    status: StatusLevel;
     activeView: '3d' | 'schematic';
     overlays: string[];
     capacity: RoomCapacityItemState[];
-    inventory: RoomInventoryItemState[];
   };
 
   batchStatus: ProgressTileState[];

@@ -16,7 +16,6 @@ import type {
   SimSpeed,
   SimulationRuntimeState,
   TrendTileState,
-  UtilityStatusItemState,
   ControlState,
 } from './operations-cockpit-state-types';
 
@@ -25,6 +24,14 @@ const modeOptions = ['Eco', 'Balanced', 'Push'] as const;
 const controlOptions = ['Auto', 'Manual'] as const;
 const speedOptions = [1, 2, 4, 8] as const satisfies readonly SimSpeed[];
 const BASE_TICK_MS = 1000;
+type SelectedSystem = 'lighting' | 'climate' | 'irrigation' | 'nutrient';
+type TelemetryViewMode = 'current' | 'trend';
+type TelemetryViewModes = Record<string, TelemetryViewMode>;
+
+const defaultTelemetryViewModes = initialRuntimeState.cockpit.environmentalTelemetry.reduce<TelemetryViewModes>(
+  (modes, item) => ({ ...modes, [item.id]: 'current' }),
+  {},
+);
 
 function Icon({
   name,
@@ -62,6 +69,8 @@ function controlSystemFromId(controlId: string): OperationsCockpitControlSystem 
 
 export function App() {
   const [runtime, setRuntime] = useState(() => initialRuntimeState);
+  const [selectedSystem, setSelectedSystem] = useState<SelectedSystem>('lighting');
+  const [telemetryViewModes, setTelemetryViewModes] = useState<TelemetryViewModes>(() => defaultTelemetryViewModes);
   const runtimeState = runtime.simulation;
   const displayState = runtime.cockpit;
 
@@ -91,6 +100,10 @@ export function App() {
     dispatch({ type: 'set-control-state', system, control: controlValue });
   }
 
+  function handleTelemetryViewModeChange(metricId: string, mode: TelemetryViewMode) {
+    setTelemetryViewModes((current) => ({ ...current, [metricId]: mode }));
+  }
+
   return (
     <main className="cockpit-shell" aria-label="Operations Cockpit static prototype">
       <Header state={displayState} runtimeState={runtimeState} dispatch={dispatch} />
@@ -99,18 +112,21 @@ export function App() {
         <NavigationRail />
 
         <section className="screen-grid" aria-label="Operations cockpit panels">
-          <RoomOverview state={displayState} />
-          <BatchStatus items={displayState.batchStatus} />
-          <EnvironmentalTelemetry items={displayState.environmentalTelemetry} />
-          <ControlPanel
-            items={displayState.controls}
+          <RoomOverview
+            state={displayState}
+            selectedSystem={selectedSystem}
+            onSystemSelect={setSelectedSystem}
             onModeChange={handleControlModeChange}
             onControlChange={handleControlStateChange}
           />
-          <TelemetryTrends items={displayState.telemetryTrends} />
+          <BatchStatus items={displayState.batchStatus} />
+          <EnvironmentalTelemetry
+            items={displayState.environmentalTelemetry}
+            trends={displayState.telemetryTrends}
+            viewModes={telemetryViewModes}
+            onViewModeChange={handleTelemetryViewModeChange}
+          />
           <EventLog entries={displayState.eventLog} />
-          <EnergyCost items={displayState.energyCost} />
-          <UtilityStatus items={displayState.utilityStatus} />
         </section>
       </div>
     </main>
@@ -215,7 +231,19 @@ function NavigationRail() {
   );
 }
 
-function RoomOverview({ state }: { state: OperationsCockpitState }) {
+function RoomOverview({
+  state,
+  selectedSystem,
+  onSystemSelect,
+  onModeChange,
+  onControlChange,
+}: {
+  state: OperationsCockpitState;
+  selectedSystem: SelectedSystem;
+  onSystemSelect: (system: SelectedSystem) => void;
+  onModeChange: (controlId: string, mode: OperatingMode) => void;
+  onControlChange: (controlId: string, controlValue: ControlState) => void;
+}) {
   const lighting = controlByLabel(state.controls, 'Light');
   const climate = controlByLabel(state.controls, 'Climate');
   const irrigation = controlByLabel(state.controls, 'Irrigation');
@@ -224,8 +252,27 @@ function RoomOverview({ state }: { state: OperationsCockpitState }) {
   return (
     <Panel className="room-overview" title={state.roomOverview.title}>
       <div className="room-ops-overview" aria-label="Room operational overview">
+        <div className="room-context" aria-label="Active operational context">
+          <div>
+            <span className="label">Room / Zone</span>
+            <strong>{state.roomOverview.roomId} / {state.roomOverview.zoneId}</strong>
+          </div>
+          <div>
+            <span className="label">Batch</span>
+            <strong>{state.roomOverview.batchId}</strong>
+          </div>
+          <div>
+            <span className="label">Phase</span>
+            <strong>{state.roomOverview.phase}</strong>
+          </div>
+          <div className={`status-${state.roomOverview.status}`}>
+            <span className="label">Status</span>
+            <strong>{titleCase(state.roomOverview.status)}</strong>
+          </div>
+        </div>
+
         <section className="overview-group capacity-group" aria-label="Capacity and active setup">
-          <h3>Capacity</h3>
+          <h3>Capacity / Readiness</h3>
           <div className="capacity-list">
             {state.roomOverview.capacity.map((item) => (
               <div key={item.id} className="capacity-item">
@@ -241,34 +288,53 @@ function RoomOverview({ state }: { state: OperationsCockpitState }) {
           <h3>Core Systems</h3>
           <div className="system-list">
             <SystemStatus
+              id="lighting"
               icon="lightbulb"
               label="Lighting System"
               mode={controlMode(lighting)}
               value="Online"
+              selected={selectedSystem === 'lighting'}
+              onSelect={onSystemSelect}
             />
             <SystemStatus
+              id="climate"
               icon="air"
               label="Climate System"
               mode={controlMode(climate)}
               value="Online"
+              selected={selectedSystem === 'climate'}
+              onSelect={onSystemSelect}
             />
             <SystemStatus
+              id="irrigation"
               icon="water_drop"
               label="Irrigation System"
               mode={controlMode(irrigation)}
               value="Online"
+              selected={selectedSystem === 'irrigation'}
+              onSelect={onSystemSelect}
             />
             <SystemStatus
+              id="nutrient"
               icon="water_drop"
               label="Nutrient System"
               mode="Reservoir Connected"
               value="Online"
+              selected={selectedSystem === 'nutrient'}
+              onSelect={onSystemSelect}
             />
           </div>
         </section>
 
+        <SystemInspector
+          state={state}
+          selectedSystem={selectedSystem}
+          onModeChange={onModeChange}
+          onControlChange={onControlChange}
+        />
+
         <section className="overview-group attention-group" aria-label="Attention and maintenance">
-          <h3>Attention</h3>
+          <h3>Attention / Room Notices</h3>
           <div className="attention-list">
             <div className="attention-item normal">
               <Icon name="check_circle" size="sm" />
@@ -282,15 +348,6 @@ function RoomOverview({ state }: { state: OperationsCockpitState }) {
             ) : null}
           </div>
         </section>
-
-        <div className="hardware-inventory" aria-label="Room hardware inventory">
-          {state.roomOverview.inventory.map((item) => (
-            <span key={item.id}>
-              <b>{item.label}</b>
-              <strong>{item.value}</strong>
-            </span>
-          ))}
-        </div>
       </div>
     </Panel>
   );
@@ -325,78 +382,125 @@ function BatchStatus({ items }: { items: ProgressTileState[] }) {
 }
 
 function SystemStatus({
+  id,
   icon,
   label,
   mode,
   value,
+  selected,
+  onSelect,
 }: {
+  id: SelectedSystem;
   icon: string;
   label: string;
   mode: string;
   value: string;
+  selected: boolean;
+  onSelect: (system: SelectedSystem) => void;
 }) {
   return (
-    <article className="system-status">
+    <button
+      className={selected ? 'system-status selected' : 'system-status'}
+      type="button"
+      aria-pressed={selected}
+      onClick={() => onSelect(id)}
+    >
       <Icon name={icon} size="sm" />
       <div>
         <strong>{label}</strong>
         <span>{mode}</span>
       </div>
       <b>{value}</b>
-    </article>
+    </button>
   );
 }
 
-function EnvironmentalTelemetry({ items }: { items: MetricTileState[] }) {
-  return (
-    <Panel className="environmental-telemetry" title="Environmental Telemetry">
-      <div className="metric-grid">
-        {items.map((item) => <MetricTile key={item.id} item={item} />)}
-      </div>
-    </Panel>
-  );
-}
-
-function ControlPanel({
-  items,
+function SystemInspector({
+  state,
+  selectedSystem,
   onModeChange,
   onControlChange,
 }: {
-  items: ControlTileState[];
+  state: OperationsCockpitState;
+  selectedSystem: SelectedSystem;
   onModeChange: (controlId: string, mode: OperatingMode) => void;
   onControlChange: (controlId: string, controlValue: ControlState) => void;
 }) {
+  const details = systemInspectorDetails(state, selectedSystem);
+  const control = details.control;
+
   return (
-    <Panel className="control-panel" title="Control Panel">
-      <div className="control-stack">
-        {items.map((item) => (
-          <ControlTile
-            key={item.id}
-            item={item}
-            onModeChange={onModeChange}
-            onControlChange={onControlChange}
-          />
-        ))}
+    <section className="overview-group system-inspector" aria-label="Selected system inspector">
+      <h3>System Inspector</h3>
+      <div className="inspector-body">
+        <div className="inspector-title">
+          <Icon name={details.icon} size="lg" />
+          <div>
+            <span className="label">Selected System</span>
+            <strong>{details.name}</strong>
+          </div>
+          <b>{details.status}</b>
+        </div>
+
+        {control ? (
+          <div className="inspector-controls">
+            <div className="control-row">
+              <span className="label">Mode</span>
+              <SegmentedControl
+                items={modeOptions}
+                active={control.activeMode}
+                onChange={(mode) => onModeChange(control.id, mode)}
+              />
+            </div>
+            <div className="control-row">
+              <span className="label">Control</span>
+              <SegmentedControl
+                items={controlOptions}
+                active={control.activeControl}
+                onChange={(controlValue) => onControlChange(control.id, controlValue)}
+              />
+            </div>
+          </div>
+        ) : null}
+
+        <dl className="inspector-facts">
+          {details.facts.map((fact) => (
+            <div key={fact.label}>
+              <dt>{fact.label}</dt>
+              <dd>{fact.value}</dd>
+            </div>
+          ))}
+        </dl>
       </div>
-    </Panel>
+    </section>
   );
 }
 
-function TelemetryTrends({ items }: { items: TrendTileState[] }) {
+function EnvironmentalTelemetry({
+  items,
+  trends,
+  viewModes,
+  onViewModeChange,
+}: {
+  items: MetricTileState[];
+  trends: TrendTileState[];
+  viewModes: TelemetryViewModes;
+  onViewModeChange: (metricId: string, mode: TelemetryViewMode) => void;
+}) {
+  const trendByLabel = new Map(trends.map((trend) => [trend.label, trend]));
+
   return (
-    <Panel
-      className="telemetry-trends"
-      title="Telemetry Trends"
-      toolbar={(
-        <div className="range-toggle" aria-label="Trend range selector">
-          <button type="button">6H</button>
-          <button className="active" type="button">24H</button>
-          <button type="button">7D</button>
-        </div>
-      )}
-    >
-      <div className="trend-grid">
-        {items.map((item) => <TrendTile key={item.id} item={item} />)}
+    <Panel className="environmental-telemetry" title="Environmental Telemetry">
+      <div className="metric-grid">
+        {items.map((item) => (
+          <MetricTile
+            key={item.id}
+            item={item}
+            trend={trendByLabel.get(item.label)}
+            viewMode={viewModes[item.id] ?? 'current'}
+            onViewModeChange={onViewModeChange}
+          />
+        ))}
       </div>
     </Panel>
   );
@@ -417,26 +521,6 @@ function EventLog({ entries }: { entries: EventLogEntryState[] }) {
     >
       <div className="event-list">
         {entries.map((entry) => <EventRow key={entry.id} entry={entry} />)}
-      </div>
-    </Panel>
-  );
-}
-
-function EnergyCost({ items }: { items: MetricTileState[] }) {
-  return (
-    <Panel className="energy-cost" title="Energy & Operating Cost">
-      <div className="energy-grid">
-        {items.map((item) => <MetricSummary key={item.id} item={item} />)}
-      </div>
-    </Panel>
-  );
-}
-
-function UtilityStatus({ items }: { items: UtilityStatusItemState[] }) {
-  return (
-    <Panel className="utility-status" title="Utility Status">
-      <div className="utility-grid">
-        {items.map((item) => <UtilityItem key={item.id} item={item} />)}
       </div>
     </Panel>
   );
@@ -464,76 +548,54 @@ function Panel({
   );
 }
 
-function MetricTile({ item }: { item: MetricTileState }) {
-  return (
-    <article className={`metric-tile status-${item.status}`}>
-      <div className="gauge" aria-hidden="true">
-        <span style={{ '--gauge-value': metricPercent(item) } as CSSProperties} />
-      </div>
-      <span className="label">{item.label}</span>
-      <strong>{formatValue(item.value, item.unit)}</strong>
-      {item.reference ? <small>{item.reference}</small> : null}
-    </article>
-  );
-}
-
-function MetricSummary({ item }: { item: MetricTileState }) {
-  return (
-    <article className="metric-summary">
-      <span className="label">{item.label}</span>
-      <strong>{formatValue(item.value, item.unit)}</strong>
-    </article>
-  );
-}
-
-function ProgressTile({ item, compact = false }: { item: ProgressTileState; compact?: boolean }) {
-  const isPercent = item.unit === '%' && typeof item.value === 'number';
-
-  return (
-    <article className={`progress-tile ${compact ? 'compact' : ''} ${item.status ? `status-${item.status}` : ''}`}>
-      <span className="label">{item.label}</span>
-      {isPercent && !compact ? <ProgressBar value={item.value as number} /> : null}
-      <strong>{formatValue(item.value, item.unit)}</strong>
-      {item.secondary ? <small>{item.secondary}</small> : null}
-    </article>
-  );
-}
-
-function ControlTile({
+function MetricTile({
   item,
-  onModeChange,
-  onControlChange,
+  trend,
+  viewMode,
+  onViewModeChange,
 }: {
-  item: ControlTileState;
-  onModeChange: (controlId: string, mode: OperatingMode) => void;
-  onControlChange: (controlId: string, controlValue: ControlState) => void;
+  item: MetricTileState;
+  trend: TrendTileState | undefined;
+  viewMode: TelemetryViewMode;
+  onViewModeChange: (metricId: string, mode: TelemetryViewMode) => void;
 }) {
   return (
-    <article className="control-tile">
-      <div className="control-title">
-        <Icon name={controlIcon(item.label)} size="lg" className="control-icon" />
-        <strong>{item.label}</strong>
+    <article className={`metric-tile status-${item.status}`}>
+      <div className="metric-tile-header">
+        <span className="label">{item.label}</span>
+        <div className="tile-toggle" aria-label={`${item.label} display mode`}>
+          <button
+            className={viewMode === 'current' ? 'active' : ''}
+            type="button"
+            aria-pressed={viewMode === 'current'}
+            onClick={() => onViewModeChange(item.id, 'current')}
+          >
+            Current
+          </button>
+          <button
+            className={viewMode === 'trend' ? 'active' : ''}
+            type="button"
+            aria-pressed={viewMode === 'trend'}
+            onClick={() => onViewModeChange(item.id, 'trend')}
+          >
+            Trend
+          </button>
+        </div>
       </div>
-      <div className="control-row">
-        <span className="label">Mode</span>
-        <SegmentedControl
-          items={modeOptions}
-          active={item.activeMode}
-          onChange={(mode) => onModeChange(item.id, mode)}
-        />
-      </div>
-      <div className="control-row">
-        <span className="label">Control</span>
-        <SegmentedControl
-          items={controlOptions}
-          active={item.activeControl}
-          onChange={(controlValue) => onControlChange(item.id, controlValue)}
-        />
-      </div>
-      <div className="control-row tuning-row">
-        <span className="label">{item.primaryTuning.label}</span>
-        <strong>{formatValue(item.primaryTuning.value, item.primaryTuning.unit)}</strong>
-      </div>
+      {viewMode === 'trend' && trend ? (
+        <div className="metric-trend">
+          <strong>{formatValue(trend.currentValue, trend.unit)}</strong>
+          <Sparkline points={trend.points} />
+        </div>
+      ) : (
+        <div className="metric-current">
+          <div className="gauge" aria-hidden="true">
+            <span style={{ '--gauge-value': metricPercent(item) } as CSSProperties} />
+          </div>
+          <strong>{formatValue(item.value, item.unit)}</strong>
+          {item.reference ? <small>{item.reference}</small> : null}
+        </div>
+      )}
     </article>
   );
 }
@@ -561,18 +623,6 @@ function SegmentedControl<T extends string>({
         </button>
       ))}
     </div>
-  );
-}
-
-function TrendTile({ item }: { item: TrendTileState }) {
-  return (
-    <article className="trend-tile">
-      <div className="trend-title">
-        <span className="label">{item.label}</span>
-        <strong>{formatValue(item.currentValue, item.unit)}</strong>
-      </div>
-      <Sparkline points={item.points} />
-    </article>
   );
 }
 
@@ -616,19 +666,6 @@ function EventRow({ entry }: { entry: EventLogEntryState }) {
   );
 }
 
-function UtilityItem({ item }: { item: UtilityStatusItemState }) {
-  return (
-    <article className={`utility-item status-${item.status}`}>
-      <Icon name={utilityIcon(item.label)} size="md" className="utility-icon" />
-      <div>
-        <span className="label">{item.label}</span>
-        <strong>{item.value}</strong>
-        {item.secondary ? <small>{item.secondary}</small> : null}
-      </div>
-    </article>
-  );
-}
-
 function ProgressBar({ value }: { value: number }) {
   const progress = Math.min(Math.max(value, 0), 100);
 
@@ -637,6 +674,105 @@ function ProgressBar({ value }: { value: number }) {
       <span style={{ width: `${progress}%` }} />
     </div>
   );
+}
+
+function systemInspectorDetails(state: OperationsCockpitState, selectedSystem: SelectedSystem) {
+  const light = controlByLabel(state.controls, 'Light');
+  const climate = controlByLabel(state.controls, 'Climate');
+  const irrigation = controlByLabel(state.controls, 'Irrigation');
+  const nutrientReservoir = metricById(state.environmentalTelemetry, 'nutrient-reservoir');
+
+  if (selectedSystem === 'lighting') {
+    return {
+      name: 'Lighting System',
+      icon: 'lightbulb',
+      status: 'Online',
+      control: light,
+      facts: [
+        inspectorFact(light?.primaryTuning.label ?? 'Target', formatInspectorValue(light?.primaryTuning)),
+        inspectorFact('Related', metricReference(state.environmentalTelemetry, 'light-output')),
+        inspectorFact('Last Event', lastEventForSystem(state.eventLog, selectedSystem, 'Mode changed to Balanced')),
+      ],
+    };
+  }
+
+  if (selectedSystem === 'climate') {
+    return {
+      name: 'Climate System',
+      icon: 'air',
+      status: 'Online',
+      control: climate,
+      facts: [
+        inspectorFact(climate?.primaryTuning.label ?? 'Target Bias', formatInspectorValue(climate?.primaryTuning)),
+        inspectorFact(
+          'Related',
+          `${metricReference(state.environmentalTelemetry, 'air-temperature')} / ${metricReference(state.environmentalTelemetry, 'airflow')}`,
+        ),
+        inspectorFact('Last Event', lastEventForSystem(state.eventLog, selectedSystem, 'No recent manual change')),
+      ],
+    };
+  }
+
+  if (selectedSystem === 'irrigation') {
+    return {
+      name: 'Irrigation System',
+      icon: 'water_drop',
+      status: 'Online',
+      control: irrigation,
+      facts: [
+        inspectorFact(irrigation?.primaryTuning.label ?? 'Target Bias', formatInspectorValue(irrigation?.primaryTuning)),
+        inspectorFact('Related', metricReference(state.environmentalTelemetry, 'irrigation-index')),
+        inspectorFact('Last Event', lastEventForSystem(state.eventLog, selectedSystem, 'Irrigation cycle complete')),
+      ],
+    };
+  }
+
+  return {
+    name: 'Nutrient System',
+    icon: 'science',
+    status: 'Online',
+    control: undefined,
+    facts: [
+      inspectorFact('Reservoir', 'Connected'),
+      inspectorFact('Related', metricReference(state.environmentalTelemetry, 'nutrient-reservoir')),
+      inspectorFact('Refill Threshold', nutrientReservoir?.reference?.replace('Refill Threshold ', '') ?? '20 %'),
+      inspectorFact('Last Event', lastEventForSystem(state.eventLog, selectedSystem, 'No active room faults')),
+    ],
+  };
+}
+
+function inspectorFact(label: string, value: string) {
+  return { label, value };
+}
+
+function formatInspectorValue(tuning?: ControlTileState['primaryTuning']) {
+  if (!tuning) return 'Nominal';
+  return formatValue(tuning.value, tuning.unit);
+}
+
+function metricReference(items: MetricTileState[], id: string) {
+  const item = metricById(items, id);
+  if (!item) return 'Unavailable';
+  return `${item.label} ${formatValue(item.value, item.unit)}`;
+}
+
+function metricById(items: MetricTileState[], id: string) {
+  return items.find((item) => item.id === id);
+}
+
+function lastEventForSystem(entries: EventLogEntryState[], selectedSystem: SelectedSystem, fallback: string) {
+  const needles: Record<SelectedSystem, string[]> = {
+    lighting: ['light'],
+    climate: ['climate', 'humidity', 'airflow'],
+    irrigation: ['irrigation'],
+    nutrient: ['nutrient', 'reservoir'],
+  };
+  const entry = entries.find((item) => {
+    const text = `${item.title} ${item.detail ?? ''}`.toLowerCase();
+    return needles[selectedSystem].some((needle) => text.includes(needle));
+  });
+
+  return entry?.title.replace(/\.$/, '') ?? fallback;
 }
 
 function formatSpeed(speed: SimSpeed) {
@@ -693,18 +829,15 @@ function navIcon(item: string) {
 
 function headerStatIcon(label: string) {
   const icons: Record<string, string> = {
+    Day: 'calendar_today',
+    Tick: 'timer',
+    Phase: 'cycle',
     'Overall Status': 'check_circle',
+    'Facility Load': 'bolt',
+    'Cost Today': 'payments',
+    Utility: 'electrical_services',
   };
   return icons[label];
-}
-
-function controlIcon(label: string) {
-  const icons: Record<string, string> = {
-    Light: 'lightbulb',
-    Climate: 'air',
-    Irrigation: 'water_drop',
-  };
-  return icons[label] ?? 'settings';
 }
 
 function severityIcon(severity: EventLogEntryState['severity'] | 'maintenance') {
@@ -715,14 +848,4 @@ function severityIcon(severity: EventLogEntryState['severity'] | 'maintenance') 
     maintenance: 'build',
   };
   return icons[severity] ?? 'info';
-}
-
-function utilityIcon(label: string) {
-  const icons: Record<string, string> = {
-    Grid: 'bolt',
-    'Backup Power': 'battery_full',
-    'Water Supply': 'plumbing',
-    Network: 'wifi',
-  };
-  return icons[label] ?? 'check_circle';
 }

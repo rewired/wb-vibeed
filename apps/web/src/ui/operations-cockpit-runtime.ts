@@ -109,6 +109,8 @@ function deriveRuntimeState(state: OperationsCockpitRuntimeState): OperationsCoc
         stats: state.cockpit.header.stats.map((stat) => {
           if (stat.label === 'Day') return { ...stat, value: day };
           if (stat.label === 'Tick') return { ...stat, value: state.simulation.tick };
+          if (stat.label === 'Facility Load') return { ...stat, value: powerNow };
+          if (stat.label === 'Cost Today') return { ...stat, value: dailyCost };
           return stat;
         }),
       },
@@ -119,7 +121,7 @@ function deriveRuntimeState(state: OperationsCockpitRuntimeState): OperationsCoc
       )),
       environmentalTelemetry: metrics,
       controls: deriveControls(state.cockpit.controls),
-      telemetryTrends: deriveTrends(state.cockpit.telemetryTrends, metrics, powerNow),
+      telemetryTrends: deriveTrends(state.cockpit.telemetryTrends, metrics),
       energyCost: deriveEnergyCost(state.cockpit.energyCost, powerNow, dailyEnergy, dailyCost),
     },
   };
@@ -193,12 +195,15 @@ function deriveEnergyCost(items: MetricTileState[], powerNow: number, dailyEnerg
   });
 }
 
-function deriveTrends(items: TrendTileState[], metrics: MetricTileState[], powerNow: number) {
+function deriveTrends(items: TrendTileState[], metrics: MetricTileState[]) {
   const metricValues: Record<string, number> = {
     'air-temperature-trend': numericMetric(metrics, 'Air Temperature', 24.6),
     'relative-humidity-trend': numericMetric(metrics, 'Relative Humidity', 58),
-    'irrigation-moisture-trend': numericMetric(metrics, 'Irrigation Index', 46),
-    'power-draw-trend': powerNow,
+    'co2-index-trend': numericMetric(metrics, 'CO2 Index', 1150),
+    'light-output-trend': numericMetric(metrics, 'Light Output', 72),
+    'irrigation-index-trend': numericMetric(metrics, 'Irrigation Index', 46),
+    'airflow-trend': numericMetric(metrics, 'Airflow', 68),
+    'nutrient-reservoir-trend': numericMetric(metrics, 'Nutrient Reservoir', 79),
   };
 
   return items.map((item) => {

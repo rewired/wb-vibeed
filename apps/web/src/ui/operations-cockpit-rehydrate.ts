@@ -1,12 +1,10 @@
 import type {
   BlueprintMetric,
-  CapacityCount,
   MetricTileState,
   OperationsCockpitBlueprint,
   OperationsCockpitRuntimeState,
   ProgressTileState,
   RoomCapacityItemState,
-  RoomInventoryItemState,
   TrendTileState,
 } from './operations-cockpit-state-types';
 
@@ -51,23 +49,25 @@ export function rehydrateOperationsCockpit(
       header: {
         title: 'Operations Cockpit',
         stats: [
-          { label: 'Room', value: blueprint.room.id },
-          { label: 'Zone', value: blueprint.zone.id },
-          { label: 'Batch', value: blueprint.batch.id },
           { label: 'Day', value: day },
           { label: 'Tick', value: blueprint.simulation.initialTick },
           { label: 'Phase', value: blueprint.batch.phase, status: blueprint.batch.status },
           { label: 'Overall Status', value: statusLabel, status: blueprint.room.status },
+          { label: 'Facility Load', value: blueprint.energy.powerNow, unit: 'kW', status: 'normal' },
+          { label: 'Cost Today', value: blueprint.energy.dailyCost, unit: '$', status: 'normal' },
+          { label: 'Utility', value: utilitySummary(blueprint), status: blueprint.utilityStatus.grid.status },
         ],
       },
       roomOverview: {
         title: `${blueprint.room.label} / ${blueprint.zone.label} Overview`,
         roomId: blueprint.room.id,
         zoneId: blueprint.zone.id,
+        batchId: blueprint.batch.id,
+        phase: blueprint.batch.phase,
+        status: blueprint.room.status,
         activeView: '3d',
         overlays: ['Supply Air', 'Return Air', 'Exhaust', 'Light', 'Irrigation', 'Sensors'],
         capacity: rehydrateCapacity(blueprint.capacity),
-        inventory: rehydrateInventory(blueprint.capacity),
       },
       batchStatus: rehydrateBatchStatus(blueprint, day, cycleProgress),
       environmentalTelemetry: [
@@ -193,18 +193,6 @@ function rehydrateCapacity(capacity: OperationsCockpitBlueprint['capacity']): Ro
   ];
 }
 
-function rehydrateInventory(capacity: OperationsCockpitBlueprint['capacity']): RoomInventoryItemState[] {
-  return [
-    inventory('tables', 'Tables', capacity.canopyTables),
-    inventory('light-rails', 'Light Rails', capacity.lightRails),
-    inventory('circulation-fans', 'Circ. Fans', capacity.circulationFans),
-    inventory('exhaust-filters', 'Exhaust Filters', capacity.exhaustFilters),
-    inventory('nutrient-reservoirs', 'Nutrient Res.', capacity.nutrientReservoirs),
-    inventory('control-cabinets', 'Ctrl Cabinets', capacity.controlCabinets),
-    inventory('sensor-points', 'Sensor Points', capacity.sensorPoints),
-  ];
-}
-
 function rehydrateBatchStatus(
   blueprint: OperationsCockpitBlueprint,
   day: number,
@@ -254,7 +242,6 @@ function rehydrateBatchStatus(
 
 function rehydrateTelemetryTrends(blueprint: OperationsCockpitBlueprint): TrendTileState[] {
   const telemetry = blueprint.telemetryBase;
-  const power = blueprint.energy.powerNow;
 
   return [
     trend('air-temperature-trend', 'Air Temperature', telemetry.airTemperature.unit, telemetry.airTemperature.value, [
@@ -275,7 +262,25 @@ function rehydrateTelemetryTrends(blueprint: OperationsCockpitBlueprint): TrendT
       0,
       0,
     ]),
-    trend('irrigation-moisture-trend', 'Irrigation / Moisture', telemetry.irrigationIndex.unit, telemetry.irrigationIndex.value, [
+    trend('co2-index-trend', 'CO2 Index', telemetry.co2Index.unit, telemetry.co2Index.value, [
+      -40,
+      -22,
+      -14,
+      10,
+      18,
+      6,
+      0,
+    ]),
+    trend('light-output-trend', 'Light Output', telemetry.lightOutput.unit, telemetry.lightOutput.value, [
+      -5,
+      -3,
+      -1,
+      0,
+      2,
+      1,
+      0,
+    ]),
+    trend('irrigation-index-trend', 'Irrigation Index', telemetry.irrigationIndex.unit, telemetry.irrigationIndex.value, [
       3,
       1,
       0,
@@ -284,7 +289,24 @@ function rehydrateTelemetryTrends(blueprint: OperationsCockpitBlueprint): TrendT
       0,
       0,
     ]),
-    trend('power-draw-trend', 'Power Draw', 'kW', power, [-1.8, -1.4, -0.5, 0, 0.4, -0.2, 0]),
+    trend('airflow-trend', 'Airflow', telemetry.airflow.unit, telemetry.airflow.value, [
+      -4,
+      -2,
+      -1,
+      1,
+      2,
+      1,
+      0,
+    ]),
+    trend('nutrient-reservoir-trend', 'Nutrient Reservoir', telemetry.nutrientReservoir.unit, telemetry.nutrientReservoir.value, [
+      2,
+      2,
+      1,
+      1,
+      0,
+      0,
+      0,
+    ]),
   ];
 }
 
@@ -307,14 +329,6 @@ function trend(id: string, label: string, unit: string, currentValue: number, of
     currentValue,
     range: '24h',
     points: offsets.map((offset) => round(currentValue + offset, unit === '°C' || unit === 'kW' ? 1 : 0)),
-  };
-}
-
-function inventory(id: string, label: string, item: CapacityCount): RoomInventoryItemState {
-  return {
-    id,
-    label,
-    value: String(item.total),
   };
 }
 
@@ -359,4 +373,11 @@ function targetFromMode(mode: OperationsCockpitBlueprint['controls']['light']['m
   if (mode === 'Eco') return 'Reduced';
   if (mode === 'Push') return 'Elevated';
   return 'Nominal';
+}
+
+function utilitySummary(blueprint: OperationsCockpitBlueprint) {
+  if (blueprint.utilityStatus.grid.status !== 'normal') return blueprint.utilityStatus.grid.value;
+  if (blueprint.utilityStatus.waterSupply.status !== 'normal') return blueprint.utilityStatus.waterSupply.value;
+  if (blueprint.utilityStatus.backupPower.status !== 'normal') return blueprint.utilityStatus.backupPower.value;
+  return 'Normal';
 }
