@@ -78,7 +78,6 @@ function controlSystemFromId(controlId: string): OperationsCockpitControlSystem 
 export function App() {
   const [runtime, setRuntime] = useState(() => initialRuntimeState);
   const [selectedObject, setSelectedObject] = useState<SelectedRoomObject>('lighting');
-  const [showBatchReport, setShowBatchReport] = useState(() => Boolean(initialRuntimeState.cockpit.batchRuntime.report));
   const [telemetryViewModes, setTelemetryViewModes] = useState<TelemetryViewModes>(initialTelemetryViewModes);
   const [eventDrawerState, setEventDrawerState] = useState<EventLogDrawerState>('collapsed');
   const runtimeState = runtime.simulation;
@@ -120,12 +119,11 @@ export function App() {
 
   function handleCompleteBatch() {
     dispatch({ type: 'complete-batch' });
-    setShowBatchReport(true);
+    setEventDrawerState('expanded');
   }
 
   function handleSelectObject(object: SelectedRoomObject) {
     setSelectedObject(object);
-    setShowBatchReport(false);
   }
 
   return (
@@ -140,15 +138,11 @@ export function App() {
             state={displayState}
             eventCount={displayState.eventLog.length}
             onToggleEvents={toggleEventDrawer}
-            onCompleteBatch={handleCompleteBatch}
-            onViewReport={() => setShowBatchReport(true)}
           />
           <RoomAssetsList state={displayState} selectedObject={selectedObject} onSelect={handleSelectObject} />
           <ObjectInspector
             state={displayState}
             selectedObject={selectedObject}
-            showBatchReport={showBatchReport}
-            onBackToInspector={() => setShowBatchReport(false)}
             onModeChange={handleControlModeChange}
             onControlChange={handleControlStateChange}
           />
@@ -161,7 +155,16 @@ export function App() {
         </section>
       </div>
 
-      <EventLogDrawer state={eventDrawerState} entries={displayState.eventLog} onToggle={toggleEventDrawer} />
+      <EventLogDrawer
+        state={eventDrawerState}
+        entries={displayState.eventLog}
+        report={displayState.batchRuntime.report}
+        lifecycleState={displayState.batchRuntime.lifecycleState}
+        onToggle={toggleEventDrawer}
+        onCompleteBatch={handleCompleteBatch}
+        onViewReport={() => setEventDrawerState('report')}
+        onBackToEvents={() => setEventDrawerState('expanded')}
+      />
     </main>
   );
 }
@@ -268,19 +271,14 @@ function RoomContext({
   state,
   eventCount,
   onToggleEvents,
-  onCompleteBatch,
-  onViewReport,
 }: {
   state: OperationsCockpitState;
   eventCount: number;
   onToggleEvents: () => void;
-  onCompleteBatch: () => void;
-  onViewReport: () => void;
 }) {
   const cycle = batchCycleSummary(state);
   const roomContext = `${state.roomOverview.roomId} / ${state.roomOverview.zoneId} - Batch ${state.roomOverview.batchId}`;
   const batchGroups = batchContextGroups(state);
-  const showLifecycleAction = cycle.lifecycleState === 'ready' || cycle.lifecycleState === 'completed';
 
   return (
     <Panel
@@ -299,25 +297,17 @@ function RoomContext({
           <ContextFact label="Room Context" value={roomContext} />
           <ContextFact label="Status" value={titleCase(state.roomOverview.status)} status={state.roomOverview.status} />
         </div>
-        <div className={`lifecycle-stack lifecycle-${cycle.lifecycleState}`}>
-          <article className={`context-cycle status-${cycle.status}`}>
-            <div className="cycle-copy">
-              <span className="label">Cycle Progress</span>
-              <strong>{cycle.progress}%</strong>
-              {cycle.lifecycleState !== 'completed' ? <small>Day {cycle.currentDay} of {cycle.cycleLengthDays}</small> : null}
-              <small>Phase: {cycle.phase}</small>
-            </div>
+        <div className="cycle-context-fields">
+          <article className={`context-cycle cycle-progress-field status-${cycle.status}`}>
+            <span className="label">Cycle Progress</span>
+            <strong>{cycle.progress}%</strong>
             <ProgressBar value={cycle.progress} />
           </article>
-          {showLifecycleAction ? (
-            <article className={`lifecycle-action-card lifecycle-action-${cycle.lifecycleState}`}>
-              <b>{cycle.lifecycleState === 'ready' ? 'Batch Harvest Ready' : 'Batch Completed'}</b>
-              <button type="button" onClick={cycle.lifecycleState === 'ready' ? onCompleteBatch : onViewReport}>
-                <Icon name={cycle.lifecycleState === 'ready' ? 'task_alt' : 'article'} size="sm" />
-                <span>{cycle.lifecycleState === 'ready' ? 'Complete Batch' : 'View Report'}</span>
-              </button>
-            </article>
-          ) : null}
+          <article className="context-phase-days">
+            <span className="label">Phase / Days</span>
+            <strong>{cycle.phase}</strong>
+            <small>Day {cycle.currentDay} of {cycle.cycleLengthDays}</small>
+          </article>
         </div>
         <div className="batch-context-facts">
           {batchGroups.map((group) => (
@@ -395,47 +385,29 @@ function RoomAssetsList({
 function ObjectInspector({
   state,
   selectedObject,
-  showBatchReport,
-  onBackToInspector,
   onModeChange,
   onControlChange,
 }: {
   state: OperationsCockpitState;
   selectedObject: SelectedRoomObject;
-  showBatchReport: boolean;
-  onBackToInspector: () => void;
   onModeChange: (controlId: string, mode: OperatingMode) => void;
   onControlChange: (controlId: string, controlValue: ControlState) => void;
 }) {
-  const report = state.batchRuntime.report;
-  const details = showBatchReport && report
-    ? {
-        name: 'Batch Report',
-        status: titleCase(report.finalStatus),
-        statusLevel: report.finalStatus,
-      }
-    : inspectorHeader(state, selectedObject);
+  const details = inspectorHeader(state, selectedObject);
 
   return (
     <Panel className="object-inspector" title="Selected Object Inspector">
       <div className="inspector-shell">
-        <div className={showBatchReport && report ? 'inspector-heading report-mode' : 'inspector-heading'}>
+        <div className="inspector-heading">
           <div>
-            <span className="label">{showBatchReport && report ? 'Inspector Mode' : 'Selected Object'}</span>
+            <span className="label">Selected Object</span>
             <strong>{details.name}</strong>
           </div>
-          {showBatchReport && report ? (
-            <button className="inspector-back-button" type="button" onClick={onBackToInspector}>
-              <Icon name="arrow_back" size="sm" />
-              <span>Back to Inspector</span>
-            </button>
-          ) : null}
           <b className={`status-pill status-${details.statusLevel}`}>{details.status}</b>
         </div>
         <InspectorContent
           state={state}
           selectedObject={selectedObject}
-          showBatchReport={showBatchReport}
           onModeChange={onModeChange}
           onControlChange={onControlChange}
         />
@@ -447,20 +419,14 @@ function ObjectInspector({
 function InspectorContent({
   state,
   selectedObject,
-  showBatchReport,
   onModeChange,
   onControlChange,
 }: {
   state: OperationsCockpitState;
   selectedObject: SelectedRoomObject;
-  showBatchReport: boolean;
   onModeChange: (controlId: string, mode: OperatingMode) => void;
   onControlChange: (controlId: string, controlValue: ControlState) => void;
 }) {
-  if (showBatchReport && state.batchRuntime.report) {
-    return <BatchReportInspector report={state.batchRuntime.report} />;
-  }
-
   if (selectedObject === 'lighting') {
     return (
       <ControlledSystemInspector
@@ -531,7 +497,7 @@ function BatchReportInspector({ report }: { report: BatchReport }) {
         ]}
       />
       <ReportSection
-        title="Operational Summary"
+        title="Operations"
         rows={[
           ['Warning Count', String(report.warningCount)],
           ['Efficiency Score', `${report.efficiencyScore} score`],
@@ -540,7 +506,7 @@ function BatchReportInspector({ report }: { report: BatchReport }) {
         ]}
       />
       <ReportSection
-        title="Cost Summary"
+        title="Cost"
         rows={[
           ['Total Energy', `${report.totalEnergyKwh.toLocaleString('en-US')} kWh`],
           ['Total Cost', formatValue(report.totalCost, '$')],
@@ -775,32 +741,63 @@ function EnvironmentalTelemetry({
 function EventLogDrawer({
   state,
   entries,
+  report,
+  lifecycleState,
   onToggle,
+  onCompleteBatch,
+  onViewReport,
+  onBackToEvents,
 }: {
   state: EventLogDrawerState;
   entries: EventLogEntryState[];
+  report: BatchReport | undefined;
+  lifecycleState: OperationsCockpitState['batchRuntime']['lifecycleState'];
   onToggle: () => void;
+  onCompleteBatch: () => void;
+  onViewReport: () => void;
+  onBackToEvents: () => void;
 }) {
   const latest = entries[0];
-  const expanded = state === 'expanded';
+  const drawerOpen = state !== 'collapsed';
+  const reportMode = state === 'report' && Boolean(report);
 
   return (
     <aside className={`event-drawer ${state}`} aria-label="Event Log">
       <div className="event-drawer-header">
-        <button type="button" onClick={onToggle} aria-expanded={expanded}>
-          <Icon name={expanded ? 'keyboard_arrow_down' : 'keyboard_arrow_up'} size="sm" />
+        <button type="button" onClick={onToggle} aria-expanded={drawerOpen}>
+          <Icon name={drawerOpen ? 'keyboard_arrow_down' : 'keyboard_arrow_up'} size="sm" />
           <span>Event Log</span>
         </button>
-        {latest ? <strong>{latest.title}</strong> : <strong>No events logged</strong>}
-        <div className="log-filter" aria-label="Event log filters">
-          <button className="active" type="button">All</button>
-          <button type="button">Alerts</button>
-          <button type="button">Info</button>
-        </div>
+        <strong>{reportMode ? 'Batch Report' : latest?.title ?? 'No events logged'}</strong>
+        {reportMode ? (
+          <button className="event-back-button" type="button" onClick={onBackToEvents}>
+            <Icon name="arrow_back" size="sm" />
+            <span>Event List</span>
+          </button>
+        ) : (
+          <div className="log-filter" aria-label="Event log filters">
+            <button className="active" type="button">All</button>
+            <button type="button">Alerts</button>
+            <button type="button">Info</button>
+          </div>
+        )}
       </div>
-      {expanded ? (
+      {reportMode && report ? (
+        <div className="event-report-detail">
+          <BatchReportInspector report={report} />
+        </div>
+      ) : state === 'expanded' ? (
         <div className="event-list">
-          {entries.map((entry) => <EventRow key={entry.id} entry={entry} />)}
+          {entries.map((entry) => (
+            <EventRow
+              key={entry.id}
+              entry={entry}
+              lifecycleState={lifecycleState}
+              hasReport={Boolean(report)}
+              onCompleteBatch={onCompleteBatch}
+              onViewReport={onViewReport}
+            />
+          ))}
         </div>
       ) : null}
     </aside>
@@ -943,9 +940,24 @@ function Gauge({ value }: { value: string | number }) {
   );
 }
 
-function EventRow({ entry }: { entry: EventLogEntryState }) {
+function EventRow({
+  entry,
+  lifecycleState,
+  hasReport,
+  onCompleteBatch,
+  onViewReport,
+}: {
+  entry: EventLogEntryState;
+  lifecycleState: OperationsCockpitState['batchRuntime']['lifecycleState'];
+  hasReport: boolean;
+  onCompleteBatch: () => void;
+  onViewReport: () => void;
+}) {
+  const showCompleteAction = lifecycleState === 'ready' && isHarvestReadyEvent(entry);
+  const showReportAction = hasReport && isBatchCompletedEvent(entry);
+
   return (
-    <article className={`event-row severity-${entry.severity}`}>
+    <article className={`event-row severity-${entry.severity} ${showCompleteAction || showReportAction ? 'event-row-actionable' : ''}`}>
       <div className="event-time">
         <strong>{entry.time}</strong>
         <span>Day {entry.day} / Tick {entry.tick}</span>
@@ -955,7 +967,19 @@ function EventRow({ entry }: { entry: EventLogEntryState }) {
         <strong>{entry.title}</strong>
         {entry.detail ? <span>{entry.detail}</span> : null}
       </div>
-      <span className="event-tag">{entry.severity}</span>
+      {showCompleteAction ? (
+        <button className="event-action-button event-action-warning" type="button" onClick={onCompleteBatch}>
+          <Icon name="task_alt" size="sm" />
+          <span>Complete Batch</span>
+        </button>
+      ) : showReportAction ? (
+        <button className="event-action-button" type="button" onClick={onViewReport}>
+          <Icon name="article" size="sm" />
+          <span>View Report</span>
+        </button>
+      ) : (
+        <span className="event-tag">{entry.severity}</span>
+      )}
     </article>
   );
 }
@@ -1268,6 +1292,14 @@ function severityIcon(severity: EventLogEntryState['severity'] | 'maintenance') 
     maintenance: 'build',
   };
   return icons[severity] ?? 'info';
+}
+
+function isHarvestReadyEvent(entry: EventLogEntryState) {
+  return entry.title === 'Batch harvest-ready.';
+}
+
+function isBatchCompletedEvent(entry: EventLogEntryState) {
+  return entry.title === 'Batch completed.';
 }
 
 function clamp(value: number, min: number, max: number) {

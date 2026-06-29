@@ -43,7 +43,7 @@ export type TelemetryKey =
   | 'nutrient-reservoir';
 export type TelemetryTileMode = 'current' | 'trend';
 export type TelemetryViewModes = Record<TelemetryKey, TelemetryTileMode>;
-export type EventLogDrawerState = 'collapsed' | 'expanded';
+export type EventLogDrawerState = 'collapsed' | 'expanded' | 'report';
 
 export interface SimulationRuntimeState {
   isRunning: boolean;
