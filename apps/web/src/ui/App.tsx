@@ -216,46 +216,14 @@ function NavigationRail() {
 }
 
 function RoomOverview({ state }: { state: OperationsCockpitState }) {
-  const room = statValue(state.header.stats, 'Room');
-  const zone = statValue(state.header.stats, 'Zone');
-  const batch = statValue(state.header.stats, 'Batch');
-  const phase = statValue(state.header.stats, 'Phase');
-  const status = statValue(state.header.stats, 'Overall Status');
   const lighting = controlByLabel(state.controls, 'Light');
   const climate = controlByLabel(state.controls, 'Climate');
   const irrigation = controlByLabel(state.controls, 'Irrigation');
-  const lightOutput = metricByLabel(state.environmentalTelemetry, 'Light Output');
-  const airflow = metricByLabel(state.environmentalTelemetry, 'Airflow');
-  const irrigationIndex = metricByLabel(state.environmentalTelemetry, 'Irrigation Index');
-  const reservoir = metricByLabel(state.environmentalTelemetry, 'Nutrient Reservoir');
   const maintenance = state.eventLog.find((entry) => entry.title.toLowerCase().includes('maintenance'));
 
   return (
     <Panel className="room-overview" title={state.roomOverview.title}>
       <div className="room-ops-overview" aria-label="Room operational overview">
-        <div className="room-summary" aria-label="Room summary">
-          <div>
-            <span className="label">Room</span>
-            <strong>{room}</strong>
-          </div>
-          <div>
-            <span className="label">Zone</span>
-            <strong>{zone}</strong>
-          </div>
-          <div>
-            <span className="label">Batch</span>
-            <strong>{batch}</strong>
-          </div>
-          <div>
-            <span className="label">Phase</span>
-            <strong>{phase}</strong>
-          </div>
-          <div className="summary-status">
-            <span className="label">Status</span>
-            <strong>{status}</strong>
-          </div>
-        </div>
-
         <section className="overview-group capacity-group" aria-label="Capacity and active setup">
           <h3>Capacity</h3>
           <div className="capacity-list">
@@ -276,25 +244,25 @@ function RoomOverview({ state }: { state: OperationsCockpitState }) {
               icon="lightbulb"
               label="Lighting System"
               mode={controlMode(lighting)}
-              value={`Output ${formatValue(lightOutput?.value ?? 72, lightOutput?.unit ?? '%')}`}
+              value="Online"
             />
             <SystemStatus
               icon="air"
               label="Climate System"
               mode={controlMode(climate)}
-              value={`Airflow ${formatValue(airflow?.value ?? 68, airflow?.unit ?? '%')}`}
+              value="Online"
             />
             <SystemStatus
               icon="water_drop"
               label="Irrigation System"
               mode={controlMode(irrigation)}
-              value={`Index ${formatValue(irrigationIndex?.value ?? 46, irrigationIndex?.unit ?? '%')}`}
+              value="Online"
             />
             <SystemStatus
               icon="water_drop"
-              label="Nutrient Reservoir"
-              mode={reservoir?.reference ?? 'Refill Threshold 20 %'}
-              value={formatValue(reservoir?.value ?? 79, reservoir?.unit ?? '%')}
+              label="Nutrient System"
+              mode="Reservoir Connected"
+              value="Online"
             />
           </div>
         </section>
@@ -662,9 +630,11 @@ function UtilityItem({ item }: { item: UtilityStatusItemState }) {
 }
 
 function ProgressBar({ value }: { value: number }) {
+  const progress = Math.min(Math.max(value, 0), 100);
+
   return (
-    <div className="progress-bar" aria-label={`Progress ${value}%`}>
-      <span style={{ width: `${value}%` }} />
+    <div className="progress-bar" aria-label={`Progress ${progress}%`}>
+      <span style={{ width: `${progress}%` }} />
     </div>
   );
 }
@@ -695,16 +665,7 @@ function titleCase(value: string) {
   return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
 }
 
-function statValue(stats: HeaderStat[], label: string) {
-  const stat = stats.find((item) => item.label === label);
-  return stat ? formatValue(stat.value, stat.unit) : 'n/a';
-}
-
 function controlByLabel(items: ControlTileState[], label: string) {
-  return items.find((item) => item.label === label);
-}
-
-function metricByLabel(items: MetricTileState[], label: string) {
   return items.find((item) => item.label === label);
 }
 
@@ -733,8 +694,6 @@ function navIcon(item: string) {
 function headerStatIcon(label: string) {
   const icons: Record<string, string> = {
     'Overall Status': 'check_circle',
-    'Power Now': 'bolt',
-    'Daily Cost': 'payments',
   };
   return icons[label];
 }

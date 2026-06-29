@@ -110,7 +110,7 @@ button {
 
 .header-stats {
   display: grid;
-  grid-template-columns: repeat(10, minmax(72px, 1fr));
+  grid-template-columns: repeat(7, minmax(88px, 1fr));
   min-width: 0;
 }
 
@@ -394,49 +394,16 @@ button.active,
 .room-ops-overview {
   display: grid;
   grid-template-columns: 0.9fr 1fr 1.35fr;
-  grid-template-rows: 74px minmax(0, 1fr) 48px;
+  grid-template-rows: minmax(0, 1fr) 48px;
   gap: 8px;
   height: calc(100% - 34px);
   padding: 10px;
 }
 
-.room-summary,
 .overview-group,
 .hardware-inventory {
   border: 1px solid rgba(188, 205, 198, 0.12);
   background: rgba(0, 0, 0, 0.16);
-}
-
-.room-summary {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1.2fr 1fr;
-}
-
-.room-summary > div {
-  display: grid;
-  align-content: center;
-  gap: 5px;
-  min-width: 0;
-  padding: 0 12px;
-  border-right: 1px solid rgba(188, 205, 198, 0.12);
-}
-
-.room-summary > div:last-child {
-  border-right: 0;
-}
-
-.room-summary strong {
-  overflow: hidden;
-  color: #e0e8e4;
-  font-size: 20px;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.room-summary .summary-status strong {
-  color: var(--green);
 }
 
 .overview-group {

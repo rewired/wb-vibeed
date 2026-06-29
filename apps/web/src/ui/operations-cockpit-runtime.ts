@@ -2,13 +2,11 @@ import type {
   ControlState,
   ControlTileState,
   EventLogEntryState,
-  HeaderStat,
   MetricTileState,
   OperatingMode,
   OperationsCockpitControlSystem,
   OperationsCockpitRuntimeAction,
   OperationsCockpitRuntimeState,
-  SimSpeed,
   TrendTileState,
 } from './operations-cockpit-state-types';
 
@@ -100,6 +98,7 @@ function deriveRuntimeState(state: OperationsCockpitRuntimeState): OperationsCoc
   const powerNow = derivePowerNow(state);
   const dailyEnergy = round(powerNow * 24, 1);
   const dailyCost = round(dailyEnergy * COST_PER_KWH, 2);
+  const cycleProgress = cycleProgressFromDay(day, state.baseline.batch.cycleLengthDays);
 
   return {
     ...state,
@@ -107,37 +106,23 @@ function deriveRuntimeState(state: OperationsCockpitRuntimeState): OperationsCoc
       ...state.cockpit,
       header: {
         ...state.cockpit.header,
-        stats: deriveHeaderStats(state.cockpit.header.stats, state.simulation.tick, day, state.simulation.speed, powerNow, dailyCost),
+        stats: state.cockpit.header.stats.map((stat) => {
+          if (stat.label === 'Day') return { ...stat, value: day };
+          if (stat.label === 'Tick') return { ...stat, value: state.simulation.tick };
+          return stat;
+        }),
       },
       batchStatus: state.cockpit.batchStatus.map((item) => (
         item.id === 'cycle-progress'
-          ? { ...item, secondary: `Day ${day} of ${state.baseline.batch.cycleLengthDays}` }
+          ? { ...item, value: cycleProgress, secondary: `Day ${day} of ${state.baseline.batch.cycleLengthDays}` }
           : item
       )),
       environmentalTelemetry: metrics,
-      controls: deriveControls(state.cockpit.controls, metrics),
+      controls: deriveControls(state.cockpit.controls),
       telemetryTrends: deriveTrends(state.cockpit.telemetryTrends, metrics, powerNow),
       energyCost: deriveEnergyCost(state.cockpit.energyCost, powerNow, dailyEnergy, dailyCost),
     },
   };
-}
-
-function deriveHeaderStats(
-  stats: HeaderStat[],
-  tick: number,
-  day: number,
-  speed: SimSpeed,
-  powerNow: number,
-  dailyCost: number,
-) {
-  return stats.map((stat) => {
-    if (stat.label === 'Day') return { ...stat, value: day };
-    if (stat.label === 'Tick') return { ...stat, value: tick };
-    if (stat.label === 'Speed') return { ...stat, value: formatSpeed(speed) };
-    if (stat.label === 'Power Now') return { ...stat, value: powerNow };
-    if (stat.label === 'Daily Cost') return { ...stat, value: dailyCost };
-    return stat;
-  });
 }
 
 function deriveTelemetry(state: OperationsCockpitRuntimeState) {
@@ -163,29 +148,26 @@ function deriveTelemetry(state: OperationsCockpitRuntimeState) {
   });
 }
 
-function deriveControls(controls: ControlTileState[], metrics: MetricTileState[]) {
-  const lightOutput = metricByLabel(metrics, 'Light Output')?.value ?? 72;
-  const irrigationIndex = metricByLabel(metrics, 'Irrigation Index')?.value ?? 46;
-
+function deriveControls(controls: ControlTileState[]) {
   return controls.map((control) => {
     if (control.label === 'Light') {
       return {
         ...control,
-        primaryTuning: { ...control.primaryTuning, value: lightOutput },
+        primaryTuning: { label: 'Target', value: targetFromMode(control.activeMode) },
       };
     }
 
     if (control.label === 'Climate') {
       return {
         ...control,
-        primaryTuning: { ...control.primaryTuning, value: control.activeMode },
+        primaryTuning: { label: 'Target Bias', value: targetFromMode(control.activeMode) },
       };
     }
 
     if (control.label === 'Irrigation') {
       return {
         ...control,
-        primaryTuning: { ...control.primaryTuning, value: irrigationIndex },
+        primaryTuning: { label: 'Target Bias', value: targetFromMode(control.activeMode) },
       };
     }
 
@@ -265,10 +247,6 @@ function controlByLabel(items: ControlTileState[], label: string) {
   return items.find((item) => item.label === label);
 }
 
-function metricByLabel(items: MetricTileState[], label: string) {
-  return items.find((item) => item.label === label);
-}
-
 function numericMetric(items: MetricTileState[], label: string, fallback: number) {
   const value = items.find((item) => item.label === label)?.value;
   return typeof value === 'number' ? value : fallback;
@@ -297,6 +275,10 @@ function dayFromTick(tick: number, ticksPerDay: number) {
   return Math.floor(tick / ticksPerDay) + 1;
 }
 
+function cycleProgressFromDay(day: number, cycleLengthDays: number) {
+  return clamp(Math.round((day / cycleLengthDays) * 100), 0, 100);
+}
+
 function clockFromTick(tick: number, ticksPerDay: number) {
   const minutesPerTick = Math.floor((24 * 60) / ticksPerDay);
   const minutes = (tick % ticksPerDay) * minutesPerTick;
@@ -309,10 +291,12 @@ function padTime(value: number) {
   return String(value).padStart(2, '0');
 }
 
-function formatSpeed(speed: SimSpeed) {
-  return `${speed}x`;
-}
-
 function slug(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
+
+function targetFromMode(mode: OperatingMode) {
+  if (mode === 'Eco') return 'Reduced';
+  if (mode === 'Push') return 'Elevated';
+  return 'Nominal';
 }

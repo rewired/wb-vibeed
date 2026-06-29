@@ -18,7 +18,7 @@ export function rehydrateOperationsCockpit(
   }
 
   const day = dayFromTick(blueprint.simulation.initialTick, blueprint.simulation.ticksPerDay);
-  const cycleProgress = Math.floor((day / blueprint.batch.cycleLengthDays) * 100);
+  const cycleProgress = cycleProgressFromDay(day, blueprint.batch.cycleLengthDays);
   const statusLabel = titleCase(blueprint.batch.status);
   const telemetry = blueprint.telemetryBase;
 
@@ -58,9 +58,6 @@ export function rehydrateOperationsCockpit(
           { label: 'Tick', value: blueprint.simulation.initialTick },
           { label: 'Phase', value: blueprint.batch.phase, status: blueprint.batch.status },
           { label: 'Overall Status', value: statusLabel, status: blueprint.room.status },
-          { label: 'Power Now', value: blueprint.energy.powerNow, unit: 'kW' },
-          { label: 'Daily Cost', value: blueprint.energy.dailyCost, unit: '$' },
-          { label: 'Speed', value: `${blueprint.simulation.initialSpeed}x` },
         ],
       },
       roomOverview: {
@@ -89,9 +86,8 @@ export function rehydrateOperationsCockpit(
           activeMode: blueprint.controls.light.mode,
           activeControl: blueprint.controls.light.control,
           primaryTuning: {
-            label: 'Intensity',
-            value: blueprint.controls.light.intensity,
-            unit: '%',
+            label: 'Target',
+            value: targetFromMode(blueprint.controls.light.mode),
           },
         },
         {
@@ -110,9 +106,8 @@ export function rehydrateOperationsCockpit(
           activeMode: blueprint.controls.irrigation.mode,
           activeControl: blueprint.controls.irrigation.control,
           primaryTuning: {
-            label: 'Irrigation Index',
-            value: blueprint.controls.irrigation.irrigationIndex,
-            unit: '%',
+            label: 'Target Bias',
+            value: targetFromMode(blueprint.controls.irrigation.mode),
           },
         },
       ],
@@ -327,6 +322,14 @@ function dayFromTick(tick: number, ticksPerDay: number) {
   return Math.floor(tick / ticksPerDay) + 1;
 }
 
+function cycleProgressFromDay(day: number, cycleLengthDays: number) {
+  return clamp(Math.round((day / cycleLengthDays) * 100), 0, 100);
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function clockFromTick(tick: number, ticksPerDay: number) {
   const minutesPerTick = Math.floor((24 * 60) / ticksPerDay);
   const minutes = (tick % ticksPerDay) * minutesPerTick;
@@ -350,4 +353,10 @@ function slug(value: string) {
 
 function titleCase(value: string) {
   return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+}
+
+function targetFromMode(mode: OperationsCockpitBlueprint['controls']['light']['mode']) {
+  if (mode === 'Eco') return 'Reduced';
+  if (mode === 'Push') return 'Elevated';
+  return 'Nominal';
 }
