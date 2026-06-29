@@ -1,4 +1,6 @@
 import type {
+  BatchLifecycleState,
+  BatchReport,
   ControlState,
   ControlTileState,
   EventLogEntryState,
@@ -31,6 +33,27 @@ export function advanceOperationsCockpitRuntime(
       simulation: {
         ...state.simulation,
         tick: state.simulation.tick + 1,
+      },
+    });
+  }
+
+  if (action.type === 'complete-batch') {
+    if (state.cockpit.batchRuntime.lifecycleState !== 'ready' || state.cockpit.batchRuntime.report) return state;
+
+    const report = generateBatchReport(state);
+    const event = batchCompletedEvent(state);
+
+    return deriveOperationsCockpitRuntime({
+      ...state,
+      cockpit: {
+        ...state.cockpit,
+        batchRuntime: {
+          ...state.cockpit.batchRuntime,
+          lifecycleState: 'completed',
+          readyForReview: false,
+          report,
+        },
+        eventLog: [event, ...state.cockpit.eventLog].slice(0, MAX_EVENT_LOG_ENTRIES),
       },
     });
   }
@@ -68,6 +91,34 @@ export function advanceOperationsCockpitRuntime(
 
 export function initializeOperationsCockpitRuntime(state: OperationsCockpitRuntimeState): OperationsCockpitRuntimeState {
   return deriveOperationsCockpitRuntime(state, { emitWarningEvents: false });
+}
+
+export function generateBatchReport(state: OperationsCockpitRuntimeState): BatchReport {
+  const runtime = state.cockpit.batchRuntime;
+  const warningCount = state.cockpit.warningConditions.length;
+  const finalStatus = warningCount > 0 ? 'warning' : state.cockpit.roomOverview.status;
+  const dailyEnergy = numericMetric(state.cockpit.energyCost, 'Daily Energy', 0);
+  const dailyCost = numericMetric(state.cockpit.energyCost, 'Daily Cost', 0);
+
+  return {
+    batchId: state.cockpit.roomOverview.batchId,
+    roomId: state.cockpit.roomOverview.roomId,
+    zoneId: state.cockpit.roomOverview.zoneId,
+    completedDay: runtime.currentDay,
+    completedTick: state.simulation.tick,
+    cycleLengthDays: runtime.cycleLengthDays,
+    actualDays: runtime.currentDay,
+    finalHealthIndex: numericMetric(state.cockpit.batchStatus, 'Batch Health Index', 0),
+    finalMoistureBalance: numericMetric(state.cockpit.batchStatus, 'Moisture Balance', 0),
+    finalQualityEstimate: numericMetric(state.cockpit.batchStatus, 'Quality Estimate', 0),
+    finalYieldEstimate: numericMetric(state.cockpit.batchStatus, 'Yield Forecast', 0),
+    totalEnergyKwh: round(dailyEnergy * runtime.currentDay, 1),
+    totalCost: round(dailyCost * runtime.currentDay, 2),
+    efficiencyScore: numericMetric(state.cockpit.energyCost, 'Efficiency', 0),
+    warningCount,
+    finalStatus,
+    summary: batchReportSummary(runtime.currentDay, runtime.cycleLengthDays, warningCount),
+  };
 }
 
 function applyControlChange(
@@ -108,8 +159,18 @@ function deriveOperationsCockpitRuntime(
 ): OperationsCockpitRuntimeState {
   const day = dayFromTick(state.simulation.tick, state.simulation.ticksPerDay);
   const cycleProgress = cycleProgressFromDay(day, state.baseline.batch.cycleLengthDays);
-  const phase = phaseFromCycleProgress(cycleProgress);
-  const readyForReview = cycleProgress >= 100;
+  const lifecycleState = deriveBatchLifecycleState(state.cockpit.batchRuntime.lifecycleState, cycleProgress);
+  const phase = lifecycleState === 'completed' ? 'Completed' : phaseFromCycleProgress(cycleProgress);
+  const readyForReview = lifecycleState === 'ready';
+  const batchRuntime = {
+    currentDay: day,
+    cycleLengthDays: state.baseline.batch.cycleLengthDays,
+    cycleProgress,
+    phase,
+    lifecycleState,
+    readyForReview,
+    ...(state.cockpit.batchRuntime.report ? { report: state.cockpit.batchRuntime.report } : {}),
+  };
   const controls = deriveControls(state.cockpit.controls);
   const metrics = deriveTelemetry({ ...state, cockpit: { ...state.cockpit, controls } });
   const warnings = deriveWarnings(state, metrics, cycleProgress, readyForReview);
@@ -148,20 +209,16 @@ function deriveOperationsCockpitRuntime(
         phase,
         status: roomStatus,
       },
-      batchRuntime: {
-        currentDay: day,
-        cycleLengthDays: state.baseline.batch.cycleLengthDays,
-        cycleProgress,
-        phase,
-        readyForReview,
-      },
+      batchRuntime,
       batchStatus: state.cockpit.batchStatus.map((item) => {
         if (item.id !== 'cycle-progress') return item;
 
         return {
           ...item,
           value: cycleProgress,
-          secondary: readyForReview
+          secondary: lifecycleState === 'completed'
+            ? `Day ${day} of ${state.baseline.batch.cycleLengthDays} / Completed`
+            : readyForReview
             ? `Day ${day} of ${state.baseline.batch.cycleLengthDays} / Ready for review`
             : `Day ${day} of ${state.baseline.batch.cycleLengthDays}`,
           status: readyForReview ? 'warning' : roomStatus,
@@ -176,6 +233,12 @@ function deriveOperationsCockpitRuntime(
       warningConditions: warnings,
     },
   };
+}
+
+function deriveBatchLifecycleState(currentLifecycleState: BatchLifecycleState, cycleProgress: number): BatchLifecycleState {
+  if (currentLifecycleState === 'completed') return 'completed';
+  if (cycleProgress >= 100) return 'ready';
+  return 'active';
 }
 
 function deriveTelemetry(state: OperationsCockpitRuntimeState): MetricTileState[] {
@@ -256,8 +319,8 @@ function deriveWarnings(
     warnings.push({
       key: 'cycle-ready',
       severity: 'warning',
-      title: 'Cycle progress reached 100%.',
-      detail: 'Batch is ready for review.',
+      title: 'Batch ready for review.',
+      detail: 'Cycle progress reached 100%.',
       object: 'canopy',
     });
   }
@@ -387,6 +450,20 @@ function warningEvent(state: OperationsCockpitRuntimeState, warning: WarningCond
   };
 }
 
+function batchCompletedEvent(state: OperationsCockpitRuntimeState): EventLogEntryState {
+  const day = dayFromTick(state.simulation.tick, state.simulation.ticksPerDay);
+
+  return {
+    id: `batch-completed-${state.simulation.tick}-${state.cockpit.roomOverview.batchId}`,
+    time: clockFromTick(state.simulation.tick, state.simulation.ticksPerDay),
+    day,
+    tick: state.simulation.tick,
+    severity: 'info',
+    title: 'Batch completed.',
+    detail: 'Batch report generated.',
+  };
+}
+
 function controlIdForSystem(system: OperationsCockpitControlSystem) {
   const ids: Record<OperationsCockpitControlSystem, string> = {
     light: 'light-control',
@@ -401,7 +478,7 @@ function controlByLabel(items: ControlTileState[], label: string) {
   return items.find((item) => item.label === label);
 }
 
-function numericMetric(items: MetricTileState[], label: string, fallback: number) {
+function numericMetric(items: { label: string; value: string | number }[], label: string, fallback: number) {
   const value = items.find((item) => item.label === label)?.value;
   return typeof value === 'number' ? value : fallback;
 }
@@ -465,6 +542,18 @@ function targetFromMode(mode: OperatingMode) {
   if (mode === 'Eco') return 'Eco';
   if (mode === 'Push') return 'Push';
   return 'Nominal';
+}
+
+function batchReportSummary(actualDays: number, cycleLengthDays: number, warningCount: number) {
+  if (actualDays > cycleLengthDays) {
+    return 'Batch completed after extended runtime. Review warning history before starting the next batch.';
+  }
+
+  if (warningCount > 0) {
+    return 'Batch completed with warning conditions present at review time.';
+  }
+
+  return 'Batch completed with stable operating conditions and minor warnings.';
 }
 
 function titleCase(value: string) {

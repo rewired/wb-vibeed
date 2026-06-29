@@ -19,6 +19,7 @@ export function rehydrateOperationsCockpit(
 
   const day = dayFromTick(blueprint.simulation.initialTick, blueprint.simulation.ticksPerDay);
   const cycleProgress = cycleProgressFromDay(day, blueprint.batch.cycleLengthDays);
+  const lifecycleState = cycleProgress >= 100 ? 'ready' : 'active';
   const statusLabel = titleCase(blueprint.room.status);
   const telemetry = blueprint.telemetryBase;
 
@@ -75,7 +76,8 @@ export function rehydrateOperationsCockpit(
         cycleLengthDays: blueprint.batch.cycleLengthDays,
         cycleProgress,
         phase: 'Production',
-        readyForReview: cycleProgress >= 100,
+        lifecycleState,
+        readyForReview: lifecycleState === 'ready',
       },
       batchStatus: rehydrateBatchStatus(blueprint, day, cycleProgress),
       environmentalTelemetry: [

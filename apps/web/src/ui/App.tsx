@@ -3,6 +3,7 @@ import blueprintData from './operations-cockpit-blueprint.json';
 import { rehydrateOperationsCockpit } from './operations-cockpit-rehydrate';
 import { advanceOperationsCockpitRuntime } from './operations-cockpit-runtime';
 import type {
+  BatchReport,
   ControlState,
   ControlTileState,
   EventLogDrawerState,
@@ -77,6 +78,7 @@ function controlSystemFromId(controlId: string): OperationsCockpitControlSystem 
 export function App() {
   const [runtime, setRuntime] = useState(() => initialRuntimeState);
   const [selectedObject, setSelectedObject] = useState<SelectedRoomObject>('lighting');
+  const [showBatchReport, setShowBatchReport] = useState(() => Boolean(initialRuntimeState.cockpit.batchRuntime.report));
   const [telemetryViewModes, setTelemetryViewModes] = useState<TelemetryViewModes>(initialTelemetryViewModes);
   const [eventDrawerState, setEventDrawerState] = useState<EventLogDrawerState>('collapsed');
   const runtimeState = runtime.simulation;
@@ -116,6 +118,16 @@ export function App() {
     setTelemetryViewModes((current) => ({ ...current, [metricId]: mode }));
   }
 
+  function handleCompleteBatch() {
+    dispatch({ type: 'complete-batch' });
+    setShowBatchReport(true);
+  }
+
+  function handleSelectObject(object: SelectedRoomObject) {
+    setSelectedObject(object);
+    setShowBatchReport(false);
+  }
+
   return (
     <main className="cockpit-shell" aria-label="Room Cockpit static prototype">
       <Header state={displayState} runtimeState={runtimeState} dispatch={dispatch} />
@@ -124,11 +136,18 @@ export function App() {
         <NavigationRail />
 
         <section className="workspace-grid" aria-label="Room cockpit workspace">
-          <RoomContext state={displayState} eventCount={displayState.eventLog.length} onToggleEvents={toggleEventDrawer} />
-          <RoomAssetsList state={displayState} selectedObject={selectedObject} onSelect={setSelectedObject} />
+          <RoomContext
+            state={displayState}
+            eventCount={displayState.eventLog.length}
+            onToggleEvents={toggleEventDrawer}
+            onCompleteBatch={handleCompleteBatch}
+            onViewReport={() => setShowBatchReport(true)}
+          />
+          <RoomAssetsList state={displayState} selectedObject={selectedObject} onSelect={handleSelectObject} />
           <ObjectInspector
             state={displayState}
             selectedObject={selectedObject}
+            showBatchReport={showBatchReport}
             onModeChange={handleControlModeChange}
             onControlChange={handleControlStateChange}
           />
@@ -248,10 +267,14 @@ function RoomContext({
   state,
   eventCount,
   onToggleEvents,
+  onCompleteBatch,
+  onViewReport,
 }: {
   state: OperationsCockpitState;
   eventCount: number;
   onToggleEvents: () => void;
+  onCompleteBatch: () => void;
+  onViewReport: () => void;
 }) {
   const cycle = batchCycleSummary(state);
   const roomContext = `${state.roomOverview.roomId} / ${state.roomOverview.zoneId} - Batch ${state.roomOverview.batchId}`;
@@ -278,9 +301,26 @@ function RoomContext({
           <div>
             <span className="label">Cycle Progress</span>
             <strong>{cycle.progress}%</strong>
-            <small>Day {cycle.currentDay} of {cycle.cycleLengthDays}</small>
+            {cycle.lifecycleState !== 'completed' ? <small>Day {cycle.currentDay} of {cycle.cycleLengthDays}</small> : null}
             <small>Phase: {cycle.phase}</small>
-            {cycle.readyForReview ? <small>Ready for review</small> : null}
+            {cycle.lifecycleState === 'ready' ? (
+              <div className="lifecycle-actions">
+                <b>Batch Ready for Review</b>
+                <button type="button" onClick={onCompleteBatch}>
+                  <Icon name="task_alt" size="sm" />
+                  <span>Complete Batch</span>
+                </button>
+              </div>
+            ) : null}
+            {cycle.lifecycleState === 'completed' ? (
+              <div className="lifecycle-actions">
+                <b>Batch Completed</b>
+                <button type="button" onClick={onViewReport}>
+                  <Icon name="article" size="sm" />
+                  <span>View Report</span>
+                </button>
+              </div>
+            ) : null}
           </div>
           <ProgressBar value={cycle.progress} />
         </article>
@@ -360,15 +400,24 @@ function RoomAssetsList({
 function ObjectInspector({
   state,
   selectedObject,
+  showBatchReport,
   onModeChange,
   onControlChange,
 }: {
   state: OperationsCockpitState;
   selectedObject: SelectedRoomObject;
+  showBatchReport: boolean;
   onModeChange: (controlId: string, mode: OperatingMode) => void;
   onControlChange: (controlId: string, controlValue: ControlState) => void;
 }) {
-  const details = inspectorHeader(state, selectedObject);
+  const report = state.batchRuntime.report;
+  const details = showBatchReport && report
+    ? {
+        name: 'Batch Report',
+        status: titleCase(report.finalStatus),
+        statusLevel: report.finalStatus,
+      }
+    : inspectorHeader(state, selectedObject);
 
   return (
     <Panel className="object-inspector" title="Selected Object Inspector">
@@ -383,6 +432,7 @@ function ObjectInspector({
         <InspectorContent
           state={state}
           selectedObject={selectedObject}
+          showBatchReport={showBatchReport}
           onModeChange={onModeChange}
           onControlChange={onControlChange}
         />
@@ -394,14 +444,20 @@ function ObjectInspector({
 function InspectorContent({
   state,
   selectedObject,
+  showBatchReport,
   onModeChange,
   onControlChange,
 }: {
   state: OperationsCockpitState;
   selectedObject: SelectedRoomObject;
+  showBatchReport: boolean;
   onModeChange: (controlId: string, mode: OperatingMode) => void;
   onControlChange: (controlId: string, controlValue: ControlState) => void;
 }) {
+  if (showBatchReport && state.batchRuntime.report) {
+    return <BatchReportInspector report={state.batchRuntime.report} />;
+  }
+
   if (selectedObject === 'lighting') {
     return (
       <ControlledSystemInspector
@@ -448,6 +504,52 @@ function InspectorContent({
   if (selectedObject === 'canopy') return <CanopyInspector state={state} />;
   if (selectedObject === 'sensors') return <SensorsInspector state={state} />;
   return <ExhaustInspector state={state} />;
+}
+
+function BatchReportInspector({ report }: { report: BatchReport }) {
+  return (
+    <div className="batch-report-view">
+      <section className="report-summary-block">
+        <div>
+          <span className="label">Batch Report</span>
+          <strong>Batch {report.batchId}</strong>
+          <small>{report.roomId} / {report.zoneId}</small>
+        </div>
+        <div>
+          <span className="label">Completed</span>
+          <strong>Day {report.completedDay}</strong>
+          <small>Tick {report.completedTick}</small>
+        </div>
+      </section>
+      <InspectorFacts
+        facts={[
+          ['Final Status', titleCase(report.finalStatus)],
+          ['Warnings', String(report.warningCount)],
+          ['Efficiency', `${report.efficiencyScore} score`],
+          ['Cycle Length', `${report.cycleLengthDays} days`],
+          ['Actual Runtime', `${report.actualDays} days`],
+        ]}
+      />
+      <InspectorFacts
+        facts={[
+          ['Yield Estimate', `${report.finalYieldEstimate} units`],
+          ['Quality Estimate', `${report.finalQualityEstimate}%`],
+          ['Health Index', `${report.finalHealthIndex}/100`],
+          ['Moisture Balance', `${report.finalMoistureBalance}%`],
+        ]}
+      />
+      <InspectorFacts
+        facts={[
+          ['Total Energy', `${report.totalEnergyKwh.toLocaleString('en-US')} kWh`],
+          ['Total Cost', formatValue(report.totalCost, '$')],
+        ]}
+      />
+      <article className="report-summary-copy">
+        <span className="label">Summary</span>
+        <strong>{report.summary}</strong>
+      </article>
+    </div>
+  );
 }
 
 function ControlledSystemInspector({
@@ -988,6 +1090,7 @@ function batchCycleSummary(state: OperationsCockpitState) {
     cycleLengthDays: runtime.cycleLengthDays,
     phase: runtime.phase,
     progress: runtime.cycleProgress,
+    lifecycleState: runtime.lifecycleState,
     readyForReview: runtime.readyForReview,
     status: cycleProgress?.status ?? state.roomOverview.status,
   };

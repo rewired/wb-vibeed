@@ -18,7 +18,8 @@ export type SeverityLevel = EventSeverity;
 export type OperatingMode = 'Eco' | 'Balanced' | 'Push';
 export type ControlState = 'Auto' | 'Manual';
 export type SimSpeed = 1 | 2 | 4 | 8;
-export type OperationalPhase = 'Startup' | 'Build' | 'Production' | 'Late Cycle' | 'Ready';
+export type OperationalPhase = 'Startup' | 'Build' | 'Production' | 'Late Cycle' | 'Ready' | 'Completed';
+export type BatchLifecycleState = 'active' | 'ready' | 'completed';
 export type RuntimeWarningKey =
   | 'cycle-ready'
   | 'filter-maintenance-due'
@@ -56,6 +57,7 @@ export type OperationsCockpitControlSystem = 'light' | 'climate' | 'irrigation';
 
 export type OperationsCockpitRuntimeAction =
   | { type: 'tick' }
+  | { type: 'complete-batch' }
   | { type: 'set-running'; isRunning: boolean }
   | { type: 'set-speed'; speed: SimSpeed }
   | {
@@ -151,12 +153,34 @@ export interface WarningConditionState {
   object: SelectedRoomObject;
 }
 
+export interface BatchReport {
+  batchId: string;
+  roomId: string;
+  zoneId: string;
+  completedDay: number;
+  completedTick: number;
+  cycleLengthDays: number;
+  actualDays: number;
+  finalHealthIndex: number;
+  finalMoistureBalance: number;
+  finalQualityEstimate: number;
+  finalYieldEstimate: number;
+  totalEnergyKwh: number;
+  totalCost: number;
+  efficiencyScore: number;
+  warningCount: number;
+  finalStatus: StatusLevel;
+  summary: string;
+}
+
 export interface BatchRuntimeSummaryState {
   currentDay: number;
   cycleLengthDays: number;
   cycleProgress: number;
   phase: OperationalPhase;
+  lifecycleState: BatchLifecycleState;
   readyForReview: boolean;
+  report?: BatchReport;
 }
 
 export interface RoomCapacityItemState {
