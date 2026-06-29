@@ -18,6 +18,7 @@ import type {
   SelectedRoomObject,
   SimSpeed,
   SimulationRuntimeState,
+  StatusLevel,
   TelemetryKey,
   TelemetryTileMode,
   TelemetryViewModes,
@@ -117,13 +118,13 @@ export function App() {
   }
 
   return (
-    <main className="cockpit-shell" aria-label="Operations Cockpit static prototype">
+    <main className="cockpit-shell" aria-label="Room Cockpit static prototype">
       <Header state={displayState} runtimeState={runtimeState} dispatch={dispatch} />
 
       <div className="cockpit-layout">
         <NavigationRail />
 
-        <section className="workspace-grid" aria-label="Operations cockpit workspace">
+        <section className="workspace-grid" aria-label="Room cockpit workspace">
           <RoomContext state={displayState} eventCount={displayState.eventLog.length} onToggleEvents={toggleEventDrawer} />
           <RoomAssetsList state={displayState} selectedObject={selectedObject} onSelect={setSelectedObject} />
           <ObjectInspector
@@ -254,7 +255,8 @@ function RoomContext({
   onToggleEvents: () => void;
 }) {
   const cycle = batchCycleSummary(state);
-  const batchFacts = batchContextFacts(state);
+  const roomContext = `${state.roomOverview.roomId} / ${state.roomOverview.zoneId} - Batch ${state.roomOverview.batchId}`;
+  const batchGroups = batchContextGroups(state);
 
   return (
     <Panel
@@ -270,9 +272,7 @@ function RoomContext({
     >
       <div className="room-context-grid" aria-label="Active operational context">
         <div className="room-context-strip">
-          <ContextFact label="Room / Zone" value={`${state.roomOverview.roomId} / ${state.roomOverview.zoneId}`} />
-          <ContextFact label="Batch" value={state.roomOverview.batchId} />
-          <ContextFact label="Phase" value={state.roomOverview.phase} />
+          <ContextFact label="Room Context" value={roomContext} />
           <ContextFact label="Status" value={titleCase(state.roomOverview.status)} status={state.roomOverview.status} />
         </div>
         <article className={`context-cycle status-${cycle.status}`}>
@@ -284,8 +284,8 @@ function RoomContext({
           <ProgressBar value={cycle.progress} />
         </article>
         <div className="batch-context-facts">
-          {batchFacts.map(([label, value]) => (
-            <ContextFact key={label} label={label} value={value} />
+          {batchGroups.map((group) => (
+            <ContextGroup key={group.label} label={group.label} rows={group.rows} />
           ))}
         </div>
       </div>
@@ -293,11 +293,27 @@ function RoomContext({
   );
 }
 
-function ContextFact({ label, value, status }: { label: string; value: string; status?: string }) {
+function ContextFact({ label, value, status }: { label: string; value: string; status?: StatusLevel }) {
   return (
-    <div className={status ? `status-${status}` : undefined}>
+    <div className={status ? `context-status status-${status}` : undefined}>
       <span className="label">{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+function ContextGroup({ label, rows }: { label: string; rows: [string, string][] }) {
+  return (
+    <div className="context-group">
+      <span className="label">{label}</span>
+      <dl>
+        {rows.map(([rowLabel, value]) => (
+          <div key={rowLabel}>
+            <dt>{rowLabel}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }
@@ -711,11 +727,11 @@ function MetricTile({
         </div>
       ) : (
         <div className="metric-current">
+          <strong>{formatValue(item.value, item.unit)}</strong>
+          {item.reference ? <small>{item.reference}</small> : null}
           <div className="gauge" aria-hidden="true">
             <span style={{ '--gauge-value': metricPercent(item) } as CSSProperties} />
           </div>
-          <strong>{formatValue(item.value, item.unit)}</strong>
-          {item.reference ? <small>{item.reference}</small> : null}
         </div>
       )}
     </article>
@@ -892,17 +908,27 @@ function inspectorHeader(state: OperationsCockpitState, selectedObject: Selected
   };
 }
 
-function batchContextFacts(state: OperationsCockpitState): [string, string][] {
+function batchContextGroups(state: OperationsCockpitState): { label: string; rows: [string, string][] }[] {
   const healthIndex = state.batchStatus.find((item) => item.id === 'batch-health-index');
   const moistureBalance = state.batchStatus.find((item) => item.id === 'moisture-balance');
   const yieldForecast = state.batchStatus.find((item) => item.id === 'yield-forecast');
   const qualityEstimate = state.batchStatus.find((item) => item.id === 'quality-estimate');
 
   return [
-    ['Health Index', healthIndex ? formatValue(healthIndex.value, healthIndex.unit) : 'Unavailable'],
-    ['Moisture Balance', moistureBalance ? formatValue(moistureBalance.value, moistureBalance.unit) : 'Unavailable'],
-    ['Yield Forecast', yieldForecast ? formatValue(yieldForecast.value, yieldForecast.unit) : 'Unavailable'],
-    ['Quality Estimate', qualityEstimate ? formatValue(qualityEstimate.value, qualityEstimate.unit) : 'Unavailable'],
+    {
+      label: 'Health / Yield',
+      rows: [
+        ['Health Index', healthIndex ? formatValue(healthIndex.value, healthIndex.unit) : 'Unavailable'],
+        ['Yield Forecast', yieldForecast ? formatValue(yieldForecast.value, yieldForecast.unit) : 'Unavailable'],
+      ],
+    },
+    {
+      label: 'Moisture / Quality',
+      rows: [
+        ['Moisture Balance', moistureBalance ? formatValue(moistureBalance.value, moistureBalance.unit) : 'Unavailable'],
+        ['Quality Estimate', qualityEstimate ? formatValue(qualityEstimate.value, qualityEstimate.unit) : 'Unavailable'],
+      ],
+    },
   ];
 }
 

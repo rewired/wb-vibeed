@@ -16,6 +16,8 @@
   --green-dim: rgba(120, 185, 75, 0.18);
   --amber: #d99b2b;
   --amber-dim: rgba(217, 155, 43, 0.18);
+  --red: #ff6f5d;
+  --red-dim: rgba(255, 111, 93, 0.16);
   --blue: #6c98b7;
   --shadow: rgba(0, 0, 0, 0.45);
   --font-ui: "Roboto Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -170,7 +172,7 @@ button {
 .status-critical strong,
 .status-critical.status-text,
 .status-critical.status-pill {
-  color: #ff6f5d;
+  color: var(--red);
 }
 
 .transport-controls {
@@ -285,7 +287,7 @@ button {
 .workspace-grid {
   display: grid;
   grid-template-columns: 430px minmax(0, 1fr);
-  grid-template-rows: 154px 456px minmax(0, 1fr);
+  grid-template-rows: 122px minmax(0, 1fr) 190px;
   gap: 8px;
   min-height: 0;
   padding-bottom: 42px;
@@ -342,10 +344,10 @@ button {
 
 .room-context-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.18fr) 240px minmax(0, 1.22fr);
+  grid-template-columns: minmax(0, 1fr) 230px minmax(0, 1.12fr);
   gap: 8px;
   height: calc(100% - 34px);
-  padding: 8px;
+  padding: 7px;
 }
 
 .room-context-strip,
@@ -356,23 +358,38 @@ button {
 }
 
 .room-context-strip {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) 142px;
 }
 
 .batch-context-facts {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.room-context-strip div,
-.batch-context-facts div,
+.room-context-strip > div,
+.batch-context-facts > div,
 .context-cycle {
   display: grid;
   align-content: center;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
-  padding: 0 12px;
+  padding: 0 10px;
   border: 1px solid rgba(188, 205, 198, 0.1);
   background: rgba(5, 8, 9, 0.42);
+}
+
+.context-status.status-normal {
+  border-color: rgba(120, 185, 75, 0.42);
+  background: rgba(120, 185, 75, 0.1);
+}
+
+.context-status.status-warning {
+  border-color: rgba(217, 155, 43, 0.5);
+  background: rgba(217, 155, 43, 0.1);
+}
+
+.context-status.status-critical {
+  border-color: rgba(255, 111, 93, 0.55);
+  background: var(--red-dim);
 }
 
 .context-cycle {
@@ -389,12 +406,45 @@ button {
   font-size: 10px;
 }
 
-.room-context-strip strong,
-.batch-context-facts strong,
+.room-context-strip > div > strong,
+.batch-context-facts > div > strong,
 .context-cycle strong {
   overflow: hidden;
   color: #e0e8e4;
   font-size: 15px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-group dl {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+
+.context-group dl div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.context-group dt {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-group dd {
+  overflow: hidden;
+  margin: 0;
+  color: #e0e8e4;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -750,19 +800,20 @@ button.active,
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 8px;
+  align-items: stretch;
+  gap: 6px;
   height: calc(100% - 34px);
-  padding: 9px;
+  padding: 7px;
 }
 
 .metric-tile {
   position: relative;
   display: grid;
   grid-template-rows: 24px minmax(0, 1fr);
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
   min-height: 0;
-  padding: 8px;
+  padding: 7px;
   border: 1px solid rgba(188, 205, 198, 0.12);
   background: rgba(0, 0, 0, 0.16);
 }
@@ -791,25 +842,25 @@ button.active,
 
 .metric-current {
   display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: 5px;
+  align-content: start;
+  justify-items: start;
+  gap: 4px;
   min-height: 0;
-  text-align: center;
+  text-align: left;
 }
 
 .metric-trend {
   display: grid;
-  grid-template-rows: 20px minmax(0, 1fr);
+  grid-template-rows: 20px 1fr;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   min-height: 0;
 }
 
 .metric-tile strong {
   overflow: hidden;
   color: #e0e8e4;
-  font-size: 17px;
+  font-size: 16px;
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -817,29 +868,26 @@ button.active,
 
 .gauge {
   position: relative;
-  width: 48px;
-  height: 24px;
+  width: 100%;
+  height: 5px;
   overflow: hidden;
+  background: rgba(188, 205, 198, 0.12);
 }
 
-.gauge::before,
 .gauge span {
   content: "";
   position: absolute;
   inset: 0;
-  border: 5px solid rgba(188, 205, 198, 0.16);
-  border-bottom: 0;
-  border-radius: 56px 56px 0 0;
 }
 
 .gauge span {
-  border-color: var(--green);
+  background: var(--green);
   clip-path: polygon(0 0, var(--gauge-value) 0, var(--gauge-value) 100%, 0 100%);
 }
 
 .sparkline {
   width: 100%;
-  height: 48px;
+  height: 42px;
 }
 
 .sparkline-grid {

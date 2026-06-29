@@ -48,7 +48,7 @@ export function rehydrateOperationsCockpit(
     },
     cockpit: {
       header: {
-        title: 'Operations Cockpit',
+        title: 'Room Cockpit',
         stats: [
           { label: 'Day', value: day },
           { label: 'Tick', value: blueprint.simulation.initialTick },
