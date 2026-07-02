@@ -986,6 +986,32 @@ export function EventLogDrawer({
   );
 }
 
+export function ReportToast({
+  report,
+  onViewReport,
+  onDismiss,
+}: {
+  report: BatchReport;
+  onViewReport: (report: BatchReport) => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <aside className="report-toast" role="status" aria-live="polite" aria-label="Batch report notification">
+      <Icon name="assignment_turned_in" size="sm" filled />
+      <div>
+        <strong>New batch report available</strong>
+        <span>Batch {report.batchId} completed on Day {report.completedDay}.</span>
+      </div>
+      <button className="report-toast-action" type="button" onClick={() => onViewReport(report)}>
+        <span>View Report</span>
+      </button>
+      <button className="report-toast-dismiss" type="button" onClick={onDismiss} aria-label="Dismiss report notification">
+        <Icon name="close" size="sm" />
+      </button>
+    </aside>
+  );
+}
+
 function Panel({
   title,
   toolbar,

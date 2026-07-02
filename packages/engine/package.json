@@ -6,8 +6,8 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "check": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -b tsconfig.json",
+    "check": "tsc -b tsconfig.json",
     "test": "echo \"No tests yet for @wb/engine\"",
     "lint": "echo \"No lint configured yet for @wb/engine\""
   }

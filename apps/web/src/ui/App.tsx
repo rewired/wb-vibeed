@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import blueprintData from './operations-cockpit-blueprint.json';
 import { rehydrateOperationsCockpit } from './operations-cockpit-rehydrate';
 import { advanceOperationsCockpitRuntime } from './operations-cockpit-runtime';
@@ -8,6 +8,7 @@ import {
   Header,
   NavigationRail,
   ObjectInspector,
+  ReportToast,
   RoomAssetsList,
   RoomContext,
 } from './room-cockpit-components';
@@ -37,6 +38,12 @@ const initialTelemetryViewModes: TelemetryViewModes = {
   'nutrient-reservoir': 'current',
 };
 const BASE_TICK_MS = 1000;
+const REPORT_TOAST_DURATION_MS = 4200;
+
+type ReportToastState = {
+  reportKey: string;
+  report: BatchReport;
+};
 
 export function App() {
   const [runtime, setRuntime] = useState(() => initialRuntimeState);
@@ -44,8 +51,15 @@ export function App() {
   const [telemetryViewModes, setTelemetryViewModes] = useState<TelemetryViewModes>(initialTelemetryViewModes);
   const [eventDrawerState, setEventDrawerState] = useState<EventLogDrawerState>('collapsed');
   const [reportViewState, setReportViewState] = useState<ReportViewState>({ type: 'closed' });
+  const [reportToast, setReportToast] = useState<ReportToastState | null>(null);
+  const lastNotifiedReportKey = useRef<string | null>(
+    initialRuntimeState.cockpit.batchRuntime.report
+      ? reportKey(initialRuntimeState.cockpit.batchRuntime.report)
+      : null,
+  );
   const runtimeState = runtime.simulation;
   const displayState = runtime.cockpit;
+  const currentReport = displayState.batchRuntime.report;
 
   useEffect(() => {
     if (!runtimeState.isRunning) return undefined;
@@ -56,6 +70,28 @@ export function App() {
 
     return () => window.clearInterval(interval);
   }, [runtimeState.isRunning, runtimeState.speed]);
+
+  useEffect(() => {
+    if (!currentReport) return;
+
+    const currentReportKey = reportKey(currentReport);
+    if (lastNotifiedReportKey.current === currentReportKey) return;
+
+    lastNotifiedReportKey.current = currentReportKey;
+    setReportToast({ reportKey: currentReportKey, report: currentReport });
+  }, [currentReport]);
+
+  useEffect(() => {
+    if (!reportToast) return undefined;
+
+    const timeout = window.setTimeout(() => {
+      setReportToast((current) => (
+        current?.reportKey === reportToast.reportKey ? null : current
+      ));
+    }, REPORT_TOAST_DURATION_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [reportToast]);
 
   function dispatch(action: OperationsCockpitRuntimeAction) {
     setRuntime((current) => advanceOperationsCockpitRuntime(current, action));
@@ -89,12 +125,10 @@ export function App() {
 
   function handleCompleteBatch() {
     dispatch({ type: 'complete-batch' });
-    setEventDrawerState('expanded');
   }
 
   function handleStartNextBatch() {
     dispatch({ type: 'start-next-batch' });
-    setEventDrawerState('expanded');
     setReportViewState({ type: 'closed' });
   }
 
@@ -106,6 +140,11 @@ export function App() {
   function handleViewBatchReport(report: BatchReport) {
     setSelectedObject('canopy');
     setReportViewState({ type: 'open', reportKey: reportKey(report) });
+  }
+
+  function handleViewToastReport(report: BatchReport) {
+    handleViewBatchReport(report);
+    setReportToast(null);
   }
 
   return (
@@ -149,6 +188,13 @@ export function App() {
         entries={displayState.eventLog}
         onToggle={toggleEventDrawer}
       />
+      {reportToast ? (
+        <ReportToast
+          report={reportToast.report}
+          onViewReport={handleViewToastReport}
+          onDismiss={() => setReportToast(null)}
+        />
+      ) : null}
     </main>
   );
 }

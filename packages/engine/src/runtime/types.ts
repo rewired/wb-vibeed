@@ -74,3 +74,68 @@ export interface OperatingControls {
   climateMode: OperatingModeClimate;
   irrigationMode: OperatingModeIrrigation;
 }
+
+export type EngineOperatingMode = 'Eco' | 'Balanced' | 'Push';
+export type EngineBatchLifecycleState = 'active' | 'ready' | 'completed';
+export type EngineWarningKey =
+  | 'cycle-ready'
+  | 'environment-drift'
+  | 'high-stress'
+  | 'low-vigor'
+  | 'nutrient-reservoir-low';
+
+export interface ResolvedActuatorTargets {
+  light: number;
+  climate: number;
+  irrigation: number;
+}
+
+export interface RoomEnvironmentState {
+  temperatureIndex: number;
+  humidityIndex: number;
+  co2Index: number;
+  lightIndex: number;
+  irrigationIndex: number;
+  airflowIndex: number;
+  nutrientReservoir: number;
+}
+
+export interface BatchCoreState {
+  maturity: number;
+  stress: number;
+  vigor: number;
+  outputPotential: number;
+}
+
+export interface BatchOutcomeAccumulators {
+  elapsedTicks: number;
+  warningTicks: number;
+  energyKwh: number;
+  operatingCost: number;
+  manualInterventions: number;
+  efficiencyScore: number;
+}
+
+export interface RoomEconomyState {
+  powerNow: number;
+  dailyEnergy: number;
+  dailyCost: number;
+}
+
+export interface RoomSimulationClockState {
+  tick: number;
+  ticksPerDay: number;
+  batchStartTick: number;
+}
+
+export interface RoomSimulationCoreState {
+  simulation: RoomSimulationClockState;
+  targets: ResolvedActuatorTargets;
+  roomEnvironment: RoomEnvironmentState;
+  batchCore: BatchCoreState;
+  lifecycleState: EngineBatchLifecycleState;
+  accumulators: BatchOutcomeAccumulators;
+  baselinePowerNow: number;
+  economy: RoomEconomyState;
+  warnings: EngineWarningKey[];
+}

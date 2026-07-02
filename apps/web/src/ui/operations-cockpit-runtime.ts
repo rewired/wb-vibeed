@@ -1,3 +1,15 @@
+import {
+  createInitialBatchCore,
+  createInitialBatchOutcomeAccumulators as createEngineInitialBatchOutcomeAccumulators,
+  deriveBatchLifecycleState,
+  deriveEfficiencyScore,
+  deriveEngineWarningKeys,
+  deriveEnvironmentDeviation as deriveEngineEnvironmentDeviation,
+  deriveRoomEconomy,
+  getOperatingModeTarget,
+  tickRoom,
+} from '@wb/engine';
+import type { RoomSimulationCoreState } from '@wb/engine';
 import type {
   ActuatorTargetState,
   BatchCoreState,
@@ -23,24 +35,9 @@ import type {
 } from './operations-cockpit-state-types';
 
 const MAX_EVENT_LOG_ENTRIES = 20;
-const COST_PER_KWH = 0.34;
 const NUTRIENT_REVIEW_THRESHOLD = 20;
 const BASE_YIELD_UNITS = 480;
-const IDEAL_ENVIRONMENT_INDEX = 65;
-const ENVIRONMENT_RATES = {
-  lightIndex: 0.35,
-  airflowIndex: 0.22,
-  irrigationIndex: 0.18,
-  temperatureIndex: 0.08,
-  humidityIndex: 0.07,
-  co2Index: 0.05,
-} as const satisfies Record<Exclude<keyof RoomEnvironmentState, 'nutrientReservoir'>, number>;
-const INITIAL_BATCH_CORE: BatchCoreState = {
-  maturity: 0,
-  stress: 10,
-  vigor: 70,
-  outputPotential: 0,
-};
+const INITIAL_BATCH_CORE: BatchCoreState = createInitialBatchCore();
 
 export function advanceOperationsCockpitRuntime(
   state: OperationsCockpitRuntimeState,
@@ -49,13 +46,7 @@ export function advanceOperationsCockpitRuntime(
   if (action.type === 'tick') {
     if (!state.simulation.isRunning) return state;
 
-    return deriveOperationsCockpitRuntime({
-      ...state,
-      simulation: {
-        ...state.simulation,
-        tick: state.simulation.tick + 1,
-      },
-    }, { advanceBatchCore: true, advanceRoomEnvironment: true, accumulateBatchTick: true });
+    return deriveOperationsCockpitRuntime(state, { advanceCoreTick: true });
   }
 
   if (action.type === 'complete-batch') {
@@ -162,14 +153,7 @@ export function initializeOperationsCockpitRuntime(state: OperationsCockpitRunti
 }
 
 export function createInitialBatchOutcomeAccumulators(): BatchOutcomeAccumulators {
-  return {
-    elapsedTicks: 0,
-    warningTicks: 0,
-    energyKwh: 0,
-    operatingCost: 0,
-    manualInterventions: 0,
-    efficiencyScore: 100,
-  };
+  return createEngineInitialBatchOutcomeAccumulators();
 }
 
 export function generateBatchReport(state: OperationsCockpitRuntimeState): BatchReport {
@@ -205,14 +189,7 @@ export function generateBatchReport(state: OperationsCockpitRuntimeState): Batch
 }
 
 export function getModeTarget(mode: OperatingMode): number {
-  switch (mode) {
-    case 'Eco':
-      return 40;
-    case 'Balanced':
-      return 65;
-    case 'Push':
-      return 85;
-  }
+  return getOperatingModeTarget(mode);
 }
 
 export function getEffectiveTarget(control: {
@@ -223,6 +200,10 @@ export function getEffectiveTarget(control: {
   return control.control === 'Manual'
     ? clamp(control.manualValue, 0, 100)
     : getModeTarget(control.mode);
+}
+
+export function deriveEnvironmentDeviation(environment: RoomEnvironmentState): number {
+  return deriveEngineEnvironmentDeviation(environment);
 }
 
 function applyControlChange(
@@ -306,43 +287,43 @@ function deriveOperationsCockpitRuntime(
   state: OperationsCockpitRuntimeState,
   options: {
     emitWarningEvents?: boolean;
-    advanceBatchCore?: boolean;
-    advanceRoomEnvironment?: boolean;
-    accumulateBatchTick?: boolean;
+    advanceCoreTick?: boolean;
   } = {},
 ): OperationsCockpitRuntimeState {
-  const globalDay = deriveGlobalDay(state.simulation.tick, state.simulation.ticksPerDay);
-  const batchDay = deriveBatchDay(state.simulation.tick, state.baseline.batch.startTick, state.simulation.ticksPerDay);
   const controls = deriveControls(state.cockpit.controls);
   const actuatorTargets = deriveActuatorTargets(controls);
-  const roomEnvironment = options.advanceRoomEnvironment
-    ? advanceRoomEnvironment(state.roomEnvironment, actuatorTargets, state.simulation.tick)
-    : state.roomEnvironment;
-  const environmentDeviation = deriveEnvironmentDeviation(roomEnvironment);
   const previousLifecycleState = state.cockpit.batchRuntime.lifecycleState;
-  const batchCore = options.advanceBatchCore && shouldUpdateBatchAccumulators(previousLifecycleState)
-    ? advanceBatchCore(state.cockpit.batchRuntime.batchCore, roomEnvironment)
-    : state.cockpit.batchRuntime.batchCore;
-  const lifecycleState = deriveBatchLifecycleState(previousLifecycleState, batchCore.maturity);
+  const currentEnvironmentDeviation = deriveEnvironmentDeviation(state.roomEnvironment);
+  const currentEconomy = deriveRoomEconomy(
+    state.baseline.energy.powerNow,
+    actuatorTargets,
+    currentEnvironmentDeviation,
+  );
+  const core = options.advanceCoreTick
+    ? tickRoom(toRoomSimulationCoreState(state, actuatorTargets, currentEconomy))
+    : undefined;
+  const simulationTick = core?.simulation.tick ?? state.simulation.tick;
+  const globalDay = deriveGlobalDay(simulationTick, state.simulation.ticksPerDay);
+  const batchDay = deriveBatchDay(simulationTick, state.baseline.batch.startTick, state.simulation.ticksPerDay);
+  const roomEnvironment = core?.roomEnvironment ?? state.roomEnvironment;
+  const environmentDeviation = deriveEnvironmentDeviation(roomEnvironment);
+  const batchCore = core?.batchCore ?? state.cockpit.batchRuntime.batchCore;
+  const lifecycleState = core?.lifecycleState ?? deriveBatchLifecycleState(previousLifecycleState, batchCore.maturity);
   const readyForReview = lifecycleState === 'ready';
   const phase = lifecycleState === 'completed' ? 'Completed' : deriveOperationalPhase(batchCore.maturity);
   const metrics = deriveTelemetry(state, roomEnvironment, actuatorTargets);
   const warnings = deriveWarnings(roomEnvironment, environmentDeviation, batchCore, readyForReview);
   const warningKeys = warnings.map((warning) => warning.key);
   const roomStatus = deriveRoomStatus(warnings, batchCore, roomEnvironment);
-  const powerNow = derivePowerNow(state, actuatorTargets, environmentDeviation);
-  const dailyEnergy = round(powerNow * 24, 1);
-  const dailyCost = round(dailyEnergy * COST_PER_KWH, 2);
-  const accumulators = options.accumulateBatchTick && shouldUpdateBatchAccumulators(lifecycleState)
-    ? accumulateBatchTick({
-        accumulators: state.cockpit.batchRuntime.accumulators,
-        hasWarnings: warnings.length > 0,
-        powerNow,
-        dailyCost,
-        ticksPerDay: state.simulation.ticksPerDay,
-        outputPotential: batchCore.outputPotential,
-      })
-    : state.cockpit.batchRuntime.accumulators;
+  const economy = core?.economy ?? deriveRoomEconomy(state.baseline.energy.powerNow, actuatorTargets, environmentDeviation);
+  const accumulators = core?.accumulators ?? state.cockpit.batchRuntime.accumulators;
+  const eventSourceState = {
+    ...state,
+    simulation: {
+      ...state.simulation,
+      tick: simulationTick,
+    },
+  };
   const batchRuntime = {
     batchDay,
     cycleLengthDays: state.cockpit.batchRuntime.cycleLengthDays,
@@ -360,11 +341,15 @@ function deriveOperationsCockpitRuntime(
     ? []
     : warnings
         .filter((warning) => !state.activeWarnings.includes(warning.key))
-        .map((warning) => warningEvent(state, warning));
+        .map((warning) => warningEvent(eventSourceState, warning));
   const eventLog = [...warningEvents, ...state.cockpit.eventLog].slice(0, MAX_EVENT_LOG_ENTRIES);
 
   return {
     ...state,
+    simulation: {
+      ...state.simulation,
+      tick: simulationTick,
+    },
     roomEnvironment,
     activeWarnings: warningKeys,
     cockpit: {
@@ -373,10 +358,10 @@ function deriveOperationsCockpitRuntime(
         ...state.cockpit.header,
         stats: state.cockpit.header.stats.map((stat) => {
           if (stat.label === 'Day') return { ...stat, value: globalDay };
-          if (stat.label === 'Tick') return { ...stat, value: state.simulation.tick };
+          if (stat.label === 'Tick') return { ...stat, value: simulationTick };
           if (stat.label === 'Overall Status') return { ...stat, value: titleCase(roomStatus), status: roomStatus };
-          if (stat.label === 'Facility Load') return { ...stat, value: powerNow };
-          if (stat.label === 'Cost Today') return { ...stat, value: dailyCost };
+          if (stat.label === 'Facility Load') return { ...stat, value: economy.powerNow };
+          if (stat.label === 'Cost Today') return { ...stat, value: economy.dailyCost };
           if (stat.label === 'Utility') return { ...stat, value: utilitySummary(utilityStatus), status: statusFromUtility(utilityStatus) };
           return stat;
         }),
@@ -391,7 +376,13 @@ function deriveOperationsCockpitRuntime(
       environmentalTelemetry: metrics,
       controls,
       telemetryTrends: deriveTrends(state.cockpit.telemetryTrends, metrics),
-      energyCost: deriveEnergyCost(state.cockpit.energyCost, powerNow, dailyEnergy, dailyCost, accumulators.efficiencyScore),
+      energyCost: deriveEnergyCost(
+        state.cockpit.energyCost,
+        economy.powerNow,
+        economy.dailyEnergy,
+        economy.dailyCost,
+        accumulators.efficiencyScore,
+      ),
       utilityStatus,
       eventLog,
       warningConditions: warnings,
@@ -407,92 +398,38 @@ export function deriveActuatorTargets(controls: ControlTileState[]): ActuatorTar
   };
 }
 
-function deriveEnvironmentTargets(targets: ActuatorTargetState, tick: number): RoomEnvironmentState {
-  return {
-    lightIndex: targets.light,
-    airflowIndex: targets.climate,
-    irrigationIndex: targets.irrigation,
-    temperatureIndex: 50 + targets.light * 0.25 - targets.climate * 0.18,
-    humidityIndex: 45 + targets.irrigation * 0.22 - targets.climate * 0.12,
-    co2Index: 60 + wave(tick, 4, 19),
-    nutrientReservoir: 100,
-  };
-}
-
-function advanceRoomEnvironment(
-  current: RoomEnvironmentState,
-  targets: ActuatorTargetState,
-  tick: number,
-): RoomEnvironmentState {
-  const targetEnvironment = deriveEnvironmentTargets(targets, tick);
-  const nutrientDrain = 0.025 + targets.irrigation * 0.001;
+function toRoomSimulationCoreState(
+  state: OperationsCockpitRuntimeState,
+  actuatorTargets: ActuatorTargetState,
+  economy: RoomSimulationCoreState['economy'],
+): RoomSimulationCoreState {
+  const environmentDeviation = deriveEnvironmentDeviation(state.roomEnvironment);
+  const readyForReview = state.cockpit.batchRuntime.lifecycleState === 'ready';
 
   return {
-    temperatureIndex: clamp(approach(current.temperatureIndex, targetEnvironment.temperatureIndex, ENVIRONMENT_RATES.temperatureIndex), 0, 100),
-    humidityIndex: clamp(approach(current.humidityIndex, targetEnvironment.humidityIndex, ENVIRONMENT_RATES.humidityIndex), 0, 100),
-    co2Index: clamp(approach(current.co2Index, targetEnvironment.co2Index, ENVIRONMENT_RATES.co2Index), 0, 100),
-    lightIndex: clamp(approach(current.lightIndex, targetEnvironment.lightIndex, ENVIRONMENT_RATES.lightIndex), 0, 100),
-    irrigationIndex: clamp(approach(current.irrigationIndex, targetEnvironment.irrigationIndex, ENVIRONMENT_RATES.irrigationIndex), 0, 100),
-    airflowIndex: clamp(approach(current.airflowIndex, targetEnvironment.airflowIndex, ENVIRONMENT_RATES.airflowIndex), 0, 100),
-    nutrientReservoir: clamp(current.nutrientReservoir - nutrientDrain, 0, 100),
+    simulation: {
+      tick: state.simulation.tick,
+      ticksPerDay: state.simulation.ticksPerDay,
+      batchStartTick: state.baseline.batch.startTick,
+    },
+    targets: {
+      light: clamp(actuatorTargets.light, 0, 100),
+      climate: clamp(actuatorTargets.climate, 0, 100),
+      irrigation: clamp(actuatorTargets.irrigation, 0, 100),
+    },
+    roomEnvironment: state.roomEnvironment,
+    batchCore: state.cockpit.batchRuntime.batchCore,
+    lifecycleState: state.cockpit.batchRuntime.lifecycleState,
+    accumulators: state.cockpit.batchRuntime.accumulators,
+    baselinePowerNow: state.baseline.energy.powerNow,
+    economy,
+    warnings: deriveEngineWarningKeys(
+      state.roomEnvironment,
+      environmentDeviation,
+      state.cockpit.batchRuntime.batchCore,
+      readyForReview,
+    ),
   };
-}
-
-export function deriveEnvironmentDeviation(environment: RoomEnvironmentState): number {
-  return (
-    distanceFromIdeal(environment.temperatureIndex, IDEAL_ENVIRONMENT_INDEX) * 0.20
-    + distanceFromIdeal(environment.humidityIndex, IDEAL_ENVIRONMENT_INDEX) * 0.18
-    + distanceFromIdeal(environment.lightIndex, IDEAL_ENVIRONMENT_INDEX) * 0.20
-    + distanceFromIdeal(environment.irrigationIndex, IDEAL_ENVIRONMENT_INDEX) * 0.18
-    + distanceFromIdeal(environment.airflowIndex, IDEAL_ENVIRONMENT_INDEX) * 0.14
-    + distanceFromIdeal(environment.co2Index, IDEAL_ENVIRONMENT_INDEX) * 0.10
-  );
-}
-
-function advanceBatchCore(batchCore: BatchCoreState, roomEnvironment: RoomEnvironmentState): BatchCoreState {
-  const environmentDeviation = deriveEnvironmentDeviation(roomEnvironment);
-  const stability = clamp(100 - environmentDeviation, 0, 100);
-  const operatingPressure = (
-    roomEnvironment.lightIndex
-    + roomEnvironment.airflowIndex
-    + roomEnvironment.irrigationIndex
-  ) / 3;
-  const stress = clamp(
-    batchCore.stress
-      + environmentDeviation * 0.025
-      + Math.max(0, operatingPressure - 75) * 0.02
-      - 0.16,
-    0,
-    100,
-  );
-  const vigor = clamp(
-    batchCore.vigor
-      + (stability - 60) * 0.02
-      - stress * 0.006,
-    0,
-    100,
-  );
-  const outputPotential = clamp(
-    batchCore.outputPotential
-      + vigor * 0.01
-      + Math.max(0, operatingPressure - 55) * 0.01
-      - stress * 0.008,
-    0,
-    100,
-  );
-
-  return {
-    maturity: clamp(batchCore.maturity + 0.22 + operatingPressure * 0.004, 0, 100),
-    stress,
-    vigor,
-    outputPotential,
-  };
-}
-
-function deriveBatchLifecycleState(currentLifecycleState: BatchLifecycleState, maturity: number): BatchLifecycleState {
-  if (currentLifecycleState === 'completed') return 'completed';
-  if (maturity >= 100) return 'ready';
-  return 'active';
 }
 
 function resetBatchStatus(items: ProgressTileState[]): ProgressTileState[] {
@@ -557,37 +494,6 @@ function incrementManualInterventions(accumulators: BatchOutcomeAccumulators): B
   };
 }
 
-function accumulateBatchTick({
-  accumulators,
-  hasWarnings,
-  powerNow,
-  dailyCost,
-  ticksPerDay,
-  outputPotential,
-}: {
-  accumulators: BatchOutcomeAccumulators;
-  hasWarnings: boolean;
-  powerNow: number;
-  dailyCost: number;
-  ticksPerDay: number;
-  outputPotential: number;
-}): BatchOutcomeAccumulators {
-  const elapsedTicks = accumulators.elapsedTicks + 1;
-  const warningTicks = accumulators.warningTicks + (hasWarnings ? 1 : 0);
-  const energyKwh = round(accumulators.energyKwh + powerNow / ticksPerDay, 4);
-  const operatingCost = round(accumulators.operatingCost + dailyCost / ticksPerDay, 4);
-  const efficiencyScore = deriveEfficiencyScore(outputPotential, operatingCost);
-
-  return {
-    ...accumulators,
-    elapsedTicks,
-    warningTicks,
-    energyKwh,
-    operatingCost,
-    efficiencyScore,
-  };
-}
-
 function deriveTelemetry(
   state: OperationsCockpitRuntimeState,
   roomEnvironment: RoomEnvironmentState,
@@ -633,59 +539,51 @@ function deriveWarnings(
   batchCore: BatchCoreState,
   readyForReview: boolean,
 ): WarningConditionState[] {
-  const warnings: WarningConditionState[] = [];
-
-  if (batchCore.stress >= 70) {
-    warnings.push({
-      key: 'high-stress',
-      severity: 'warning',
-      title: 'High stress.',
-      detail: `Batch stress is ${round(batchCore.stress)} / 100.`,
-      object: 'canopy',
+  return deriveEngineWarningKeys(roomEnvironment, environmentDeviation, batchCore, readyForReview)
+    .map((key) => {
+      switch (key) {
+        case 'high-stress':
+          return {
+            key,
+            severity: 'warning',
+            title: 'High stress.',
+            detail: `Batch stress is ${round(batchCore.stress)} / 100.`,
+            object: 'canopy',
+          };
+        case 'low-vigor':
+          return {
+            key,
+            severity: 'warning',
+            title: 'Low vigor.',
+            detail: `Batch vigor is ${round(batchCore.vigor)} / 100.`,
+            object: 'canopy',
+          };
+        case 'environment-drift':
+          return {
+            key,
+            severity: 'warning',
+            title: 'Environment drift.',
+            detail: `Room environment deviation is ${round(environmentDeviation)} / 100.`,
+            object: 'sensors',
+          };
+        case 'nutrient-reservoir-low':
+          return {
+            key,
+            severity: 'warning',
+            title: 'Nutrient reservoir low.',
+            detail: 'Reservoir level is below the operating threshold.',
+            object: 'nutrient',
+          };
+        case 'cycle-ready':
+          return {
+            key,
+            severity: 'warning',
+            title: 'Batch harvest-ready.',
+            detail: 'Batch maturity has reached 100 / 100.',
+            object: 'canopy',
+          };
+      }
     });
-  }
-
-  if (batchCore.vigor <= 40) {
-    warnings.push({
-      key: 'low-vigor',
-      severity: 'warning',
-      title: 'Low vigor.',
-      detail: `Batch vigor is ${round(batchCore.vigor)} / 100.`,
-      object: 'canopy',
-    });
-  }
-
-  if (environmentDeviation >= 35) {
-    warnings.push({
-      key: 'environment-drift',
-      severity: 'warning',
-      title: 'Environment drift.',
-      detail: `Room environment deviation is ${round(environmentDeviation)} / 100.`,
-      object: 'sensors',
-    });
-  }
-
-  if (roomEnvironment.nutrientReservoir <= NUTRIENT_REVIEW_THRESHOLD) {
-    warnings.push({
-      key: 'nutrient-reservoir-low',
-      severity: 'warning',
-      title: 'Nutrient reservoir low.',
-      detail: 'Reservoir level is below the operating threshold.',
-      object: 'nutrient',
-    });
-  }
-
-  if (readyForReview) {
-    warnings.push({
-      key: 'cycle-ready',
-      severity: 'warning',
-      title: 'Batch harvest-ready.',
-      detail: 'Batch maturity has reached 100 / 100.',
-      object: 'canopy',
-    });
-  }
-
-  return warnings;
 }
 
 function deriveRoomStatus(
@@ -715,20 +613,6 @@ function deriveControls(controls: ControlTileState[]) {
       },
     };
   });
-}
-
-function derivePowerNow(
-  state: OperationsCockpitRuntimeState,
-  actuatorTargets: ActuatorTargetState,
-  environmentDeviation: number,
-) {
-  const targetLoad =
-    actuatorTargets.light * 0.08
-    + actuatorTargets.climate * 0.07
-    + actuatorTargets.irrigation * 0.03;
-  const environmentLoadPenalty = Math.max(0, environmentDeviation - 20) * 0.03;
-
-  return round(clamp(state.baseline.energy.powerNow + targetLoad + environmentLoadPenalty, 0, 40), 1);
 }
 
 function deriveEnergyCost(
@@ -911,19 +795,6 @@ function effectiveLabel(label: string) {
   return 'Effective Irrigation Index';
 }
 
-function approach(current: number, target: number, rate: number): number {
-  const delta = target - current;
-  return current + delta * rate;
-}
-
-function distanceFromIdeal(value: number, ideal: number): number {
-  return Math.abs(value - ideal);
-}
-
-function wave(tick: number, amplitude: number, period: number, phase = 0) {
-  return Math.sin((tick + phase) / period) * amplitude;
-}
-
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
@@ -979,11 +850,6 @@ function batchReportSummary(batchCore: BatchCoreState, efficiency: number, warni
   if (warningCount > 0) return 'Batch completed with warning conditions present at review.';
   if (efficiency >= 70) return 'Batch completed with stable core values and efficient operating cost.';
   return 'Batch completed with stable core values and moderate operating cost.';
-}
-
-function deriveEfficiencyScore(outputPotential: number, operatingCost: number) {
-  if (operatingCost <= 0) return 100;
-  return clamp(Math.round((outputPotential / Math.max(1, operatingCost)) * 1000), 0, 100);
 }
 
 function titleCase(value: string) {
