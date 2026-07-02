@@ -12,7 +12,13 @@
  * Do not add simulation logic to this file.
  */
 
-import type { EngineFeedbackCode, EngineFeedbackSeverity } from '@wb/engine';
+import type {
+  EngineBatchGrade,
+  EngineBatchResultReasonCode,
+  EngineCompletionRecommendation,
+  EngineFeedbackCode,
+  EngineFeedbackSeverity,
+} from '@wb/engine';
 
 export type StatusLevel = 'normal' | 'warning' | 'critical';
 export type EventSeverity = 'info' | 'warning' | 'critical';
@@ -50,6 +56,7 @@ export type EventLogDrawerState = 'collapsed' | 'expanded';
 export type ReportViewState =
   | { type: 'closed' }
   | { type: 'open'; reportKey: string };
+export type BatchOutlookLabel = 'Weak' | 'Building' | 'Good outlook' | 'Ready' | 'Risky wait';
 
 export interface SimulationRuntimeState {
   isRunning: boolean;
@@ -218,9 +225,23 @@ export interface BatchReport {
   qualityEstimate: number;
   operatingCost: number;
   efficiency: number;
+  batchScore: number;
+  grade: EngineBatchGrade;
+  resultReasons: EngineBatchResultReasonCode[];
+  completionRecommendation: EngineCompletionRecommendation;
   warnings: number;
   finalStatus: StatusLevel;
   summary: string;
+}
+
+export interface BatchLoopSummaryState {
+  objectiveLabel: string;
+  objectiveDetail: string;
+  outlook: BatchOutlookLabel;
+  recommendation: EngineCompletionRecommendation;
+  completionHint: 'Early result' | 'Ready' | 'Risky wait';
+  readinessStatus: 'building' | 'ready' | 'risky';
+  blockers: EngineBatchResultReasonCode[];
 }
 
 export interface BatchRuntimeSummaryState {
@@ -233,6 +254,7 @@ export interface BatchRuntimeSummaryState {
   readyForReview: boolean;
   batchCore: BatchCoreState;
   accumulators: BatchOutcomeAccumulators;
+  loopSummary: BatchLoopSummaryState;
   report?: BatchReport;
 }
 

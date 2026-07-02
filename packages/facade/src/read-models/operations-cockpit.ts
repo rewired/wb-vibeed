@@ -1,5 +1,13 @@
 import type { AlertMessage } from '@wb/shared';
-import type { EngineFeedbackCode, EngineFeedbackSeverity, EngineFeedbackSignal, RuntimeState } from '@wb/engine';
+import { deriveBatchResult } from '@wb/engine';
+import type {
+  EngineBatchResultReasonCode,
+  EngineCompletionRecommendation,
+  EngineFeedbackCode,
+  EngineFeedbackSeverity,
+  EngineFeedbackSignal,
+  RuntimeState,
+} from '@wb/engine';
 
 export interface OperationsCockpitReadModel {
   simulation: RuntimeState['simulation'];
@@ -8,8 +16,27 @@ export interface OperationsCockpitReadModel {
   economy: RuntimeState['economy'];
   controls: RuntimeState['controls'];
   feedback: OperationsCockpitFeedbackReadModel;
+  batchLoop: OperationsCockpitBatchLoopReadModel;
   alerts: AlertMessage[];
   events: RuntimeState['events'];
+}
+
+export type OperationsCockpitBatchOutlook = 'Weak' | 'Building' | 'Good outlook' | 'Ready' | 'Risky wait';
+
+export interface OperationsCockpitBatchLoopReadModel {
+  objective: {
+    label: string;
+    detail: string;
+  };
+  recommendation: EngineCompletionRecommendation;
+  readinessStatus: 'building' | 'ready' | 'risky';
+  outlook: OperationsCockpitBatchOutlook;
+  blockers: EngineBatchResultReasonCode[];
+  completed?: {
+    batchScore: number;
+    grade: string;
+    resultReasons: EngineBatchResultReasonCode[];
+  };
 }
 
 export interface OperationsCockpitFeedbackReadModel {
@@ -33,9 +60,60 @@ export function toOperationsCockpitReadModel(state: RuntimeState): OperationsCoc
     economy: state.economy,
     controls: state.controls,
     feedback: deriveFeedback(state),
+    batchLoop: deriveBatchLoop(state),
     alerts: deriveAlerts(state),
     events: state.events,
   };
+}
+
+function deriveBatchLoop(state: RuntimeState): OperationsCockpitBatchLoopReadModel {
+  const result = deriveBatchResult({
+    batchCore: {
+      maturity: state.batch.maturity,
+      stress: state.batch.stress,
+      vigor: state.room.stability,
+      outputPotential: state.batch.qualityPotential,
+    },
+    accumulators: {
+      elapsedTicks: Math.max(0, state.simulation.tick),
+      warningTicks: state.events.filter((event) => event.label.toLowerCase().includes('warning')).length,
+      energyKwh: state.economy.energyCostTotal,
+      operatingCost: state.economy.operatingCostTotal,
+      manualInterventions: 0,
+      efficiencyScore: state.economy.operatingCostTotal > 0
+        ? Math.max(0, Math.min(100, Math.round((state.batch.qualityPotential / state.economy.operatingCostTotal) * 1000)))
+        : 100,
+    },
+    lifecycleState: state.batch.maturity >= 100 ? 'ready' : 'active',
+  });
+  const blockers = result.resultReasons.filter((reason) => reason !== 'stable_run').slice(0, 3);
+
+  return {
+    objective: {
+      label: 'Run Target',
+      detail: 'Reach readiness with controlled stress and cost.',
+    },
+    recommendation: result.completionRecommendation,
+    readinessStatus: result.completionRecommendation === 'overdue-risk'
+      ? 'risky'
+      : result.completionRecommendation === 'ready'
+      ? 'ready'
+      : 'building',
+    outlook: deriveBatchOutlook(result.grade, result.completionRecommendation, state.batch.maturity),
+    blockers,
+  };
+}
+
+function deriveBatchOutlook(
+  grade: string,
+  recommendation: EngineCompletionRecommendation,
+  maturity: number,
+): OperationsCockpitBatchOutlook {
+  if (recommendation === 'overdue-risk') return 'Risky wait';
+  if (recommendation === 'ready') return 'Ready';
+  if (maturity < 35 || grade === 'D') return 'Weak';
+  if (grade === 'B' || grade === 'A' || grade === 'S') return 'Good outlook';
+  return 'Building';
 }
 
 function deriveAlerts(state: RuntimeState): AlertMessage[] {

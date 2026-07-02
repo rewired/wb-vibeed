@@ -1,6 +1,7 @@
 import {
   createInitialBatchCore,
   createInitialBatchOutcomeAccumulators as createEngineInitialBatchOutcomeAccumulators,
+  deriveBatchResult,
   deriveBatchLifecycleState,
   deriveEfficiencyScore,
   deriveEngineWarningKeys,
@@ -10,12 +11,20 @@ import {
   getOperatingModeTarget,
   tickRoom,
 } from '@wb/engine';
-import type { EngineFeedbackCode, EngineFeedbackSignal, RoomSimulationCoreState } from '@wb/engine';
+import type {
+  EngineBatchResult,
+  EngineBatchResultReasonCode,
+  EngineFeedbackCode,
+  EngineFeedbackSignal,
+  RoomSimulationCoreState,
+} from '@wb/engine';
 import type {
   ActuatorTargetState,
   BatchCoreState,
   BatchLifecycleState,
+  BatchLoopSummaryState,
   BatchOutcomeAccumulators,
+  BatchOutlookLabel,
   BatchReport,
   CockpitFeedbackHint,
   CockpitFeedbackState,
@@ -53,7 +62,7 @@ export function advanceOperationsCockpitRuntime(
   }
 
   if (action.type === 'complete-batch') {
-    if (state.cockpit.batchRuntime.lifecycleState !== 'ready' || state.cockpit.batchRuntime.report) return state;
+    if (state.cockpit.batchRuntime.lifecycleState === 'completed' || state.cockpit.batchRuntime.report) return state;
 
     const report = generateBatchReport(state);
     const event = batchCompletedEvent(state, report);
@@ -109,6 +118,7 @@ export function advanceOperationsCockpitRuntime(
           readyForReview: false,
           batchCore: INITIAL_BATCH_CORE,
           accumulators: createInitialBatchOutcomeAccumulators(),
+          loopSummary: createInitialBatchLoopSummary(),
         },
         batchStatus: resetBatchStatus(state.cockpit.batchStatus),
         eventLog: [event, ...state.cockpit.eventLog].slice(0, MAX_EVENT_LOG_ENTRIES),
@@ -159,9 +169,27 @@ export function createInitialBatchOutcomeAccumulators(): BatchOutcomeAccumulator
   return createEngineInitialBatchOutcomeAccumulators();
 }
 
+function createInitialBatchLoopSummary(): BatchLoopSummaryState {
+  return {
+    objectiveLabel: 'Run Target',
+    objectiveDetail: 'Reach readiness with controlled stress and cost.',
+    outlook: 'Building',
+    recommendation: 'wait',
+    completionHint: 'Early result',
+    readinessStatus: 'building',
+    blockers: ['completed_early', 'maturity_low'],
+  };
+}
+
 export function generateBatchReport(state: OperationsCockpitRuntimeState): BatchReport {
   const batchCore = state.cockpit.batchRuntime.batchCore;
   const accumulators = state.cockpit.batchRuntime.accumulators;
+  const result = deriveBatchResult({
+    batchCore,
+    accumulators,
+    lifecycleState: state.cockpit.batchRuntime.lifecycleState,
+    warnings: state.cockpit.warningConditions.map((warning) => warning.key),
+  });
   const completedDay = deriveGlobalDay(state.simulation.tick, state.simulation.ticksPerDay);
   const batchDuration = deriveBatchElapsedTicks(state.simulation.tick, state.baseline.batch.startTick);
   const warningCount = state.cockpit.warningConditions.length;
@@ -185,9 +213,13 @@ export function generateBatchReport(state: OperationsCockpitRuntimeState): Batch
     qualityEstimate,
     operatingCost: round(accumulators.operatingCost, 2),
     efficiency,
+    batchScore: result.batchScore,
+    grade: result.grade,
+    resultReasons: result.resultReasons,
+    completionRecommendation: result.completionRecommendation,
     warnings: warningCount,
     finalStatus,
-    summary: batchReportSummary(batchCore, efficiency, warningCount),
+    summary: batchReportSummary(batchCore, efficiency, warningCount, result.resultReasons),
   };
 }
 
@@ -320,6 +352,12 @@ function deriveOperationsCockpitRuntime(
   const roomStatus = deriveRoomStatus(warnings, batchCore, roomEnvironment);
   const economy = core?.economy ?? deriveRoomEconomy(state.baseline.energy.powerNow, actuatorTargets, environmentDeviation);
   const accumulators = core?.accumulators ?? state.cockpit.batchRuntime.accumulators;
+  const batchResult = deriveBatchResult({
+    batchCore,
+    accumulators,
+    lifecycleState,
+    warnings: warningKeys,
+  });
   const eventSourceState = {
     ...state,
     simulation: {
@@ -337,6 +375,7 @@ function deriveOperationsCockpitRuntime(
     readyForReview,
     batchCore,
     accumulators,
+    loopSummary: deriveBatchLoopSummary(batchResult, batchCore),
     ...(state.cockpit.batchRuntime.report ? { report: state.cockpit.batchRuntime.report } : {}),
   };
   const utilityStatus = deriveUtilityStatus(state.cockpit.utilityStatus, warnings);
@@ -501,6 +540,49 @@ function deriveCockpitFeedback(core: RoomSimulationCoreState): CockpitFeedbackSt
     primary: translateFeedbackSignal(feedback.primary),
     secondary: hints.filter((hint) => hint.code !== feedback.primary.code),
   };
+}
+
+function deriveBatchLoopSummary(
+  result: EngineBatchResult,
+  batchCore: BatchCoreState,
+): BatchLoopSummaryState {
+  return {
+    objectiveLabel: 'Run Target',
+    objectiveDetail: 'Reach readiness with controlled stress and cost.',
+    outlook: deriveBatchOutlook(result, batchCore),
+    recommendation: result.completionRecommendation,
+    completionHint: completionHint(result.completionRecommendation),
+    readinessStatus: result.completionRecommendation === 'overdue-risk'
+      ? 'risky'
+      : result.completionRecommendation === 'ready'
+      ? 'ready'
+      : 'building',
+    blockers: result.resultReasons.filter(isReadinessBlocker).slice(0, 3),
+  };
+}
+
+function deriveBatchOutlook(result: EngineBatchResult, batchCore: BatchCoreState): BatchOutlookLabel {
+  if (result.completionRecommendation === 'overdue-risk') return 'Risky wait';
+  if (result.completionRecommendation === 'ready') return 'Ready';
+  if (batchCore.maturity < 35 || result.grade === 'D') return 'Weak';
+  if (result.grade === 'B' || result.grade === 'A' || result.grade === 'S') return 'Good outlook';
+  return 'Building';
+}
+
+function completionHint(recommendation: EngineBatchResult['completionRecommendation']): BatchLoopSummaryState['completionHint'] {
+  if (recommendation === 'overdue-risk') return 'Risky wait';
+  if (recommendation === 'ready') return 'Ready';
+  return 'Early result';
+}
+
+function isReadinessBlocker(reason: EngineBatchResultReasonCode): boolean {
+  return (
+    reason === 'completed_early'
+    || reason === 'maturity_low'
+    || reason === 'output_potential_limited'
+    || reason === 'stress_high'
+    || reason === 'warning_pressure'
+  );
 }
 
 function translateFeedbackSignal(signal: EngineFeedbackSignal): CockpitFeedbackHint {
@@ -964,9 +1046,16 @@ function slug(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
 
-function batchReportSummary(batchCore: BatchCoreState, efficiency: number, warningCount: number) {
+function batchReportSummary(
+  batchCore: BatchCoreState,
+  efficiency: number,
+  warningCount: number,
+  reasons: readonly EngineBatchResultReasonCode[],
+) {
+  if (reasons.includes('completed_early')) return 'Batch completed early with limited maturity and output.';
   if (batchCore.stress >= 70) return 'Batch completed with elevated stress reducing outcome quality.';
   if (batchCore.vigor <= 40) return 'Batch completed with low vigor and constrained output potential.';
+  if (reasons.includes('cost_heavy')) return 'Batch completed with operating cost weighing on the result.';
   if (warningCount > 0) return 'Batch completed with warning conditions present at review.';
   if (efficiency >= 70) return 'Batch completed with stable core values and efficient operating cost.';
   return 'Batch completed with stable core values and moderate operating cost.';

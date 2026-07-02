@@ -77,6 +77,17 @@ export interface OperatingControls {
 
 export type EngineOperatingMode = 'Eco' | 'Balanced' | 'Push';
 export type EngineBatchLifecycleState = 'active' | 'ready' | 'completed';
+export type EngineBatchGrade = 'S' | 'A' | 'B' | 'C' | 'D';
+export type EngineCompletionRecommendation = 'wait' | 'ready' | 'overdue-risk';
+export type EngineBatchResultReasonCode =
+  | 'completed_early'
+  | 'maturity_low'
+  | 'output_potential_limited'
+  | 'cost_efficient_but_underdeveloped'
+  | 'stress_high'
+  | 'cost_heavy'
+  | 'warning_pressure'
+  | 'stable_run';
 export type EngineWarningKey =
   | 'cycle-ready'
   | 'environment-drift'
@@ -143,6 +154,13 @@ export interface BatchOutcomeAccumulators {
   operatingCost: number;
   manualInterventions: number;
   efficiencyScore: number;
+}
+
+export interface EngineBatchResult {
+  batchScore: number;
+  grade: EngineBatchGrade;
+  resultReasons: EngineBatchResultReasonCode[];
+  completionRecommendation: EngineCompletionRecommendation;
 }
 
 export interface RoomEconomyState {

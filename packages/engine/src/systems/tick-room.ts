@@ -1,7 +1,11 @@
 import type {
   BatchCoreState,
   BatchOutcomeAccumulators,
+  EngineBatchGrade,
   EngineBatchLifecycleState,
+  EngineBatchResult,
+  EngineBatchResultReasonCode,
+  EngineCompletionRecommendation,
   EngineFeedbackSignal,
   EngineOperatingMode,
   EngineWarningKey,
@@ -22,6 +26,8 @@ const SLOW_MATURITY_PRESSURE_MAX = 48;
 const DRIFT_THRESHOLD = 24;
 const UNDER_TARGET_THRESHOLD = 50;
 const NEAR_READY_MATURITY = 85;
+const READY_MATURITY = 100;
+const RESULT_REASON_LIMIT = 3;
 const ENVIRONMENT_RATES = {
   lightIndex: 0.35,
   airflowIndex: 0.22,
@@ -223,6 +229,100 @@ export function deriveBatchLifecycleState(
 export function deriveEfficiencyScore(outputPotential: number, operatingCost: number): number {
   if (operatingCost <= 0) return 100;
   return clamp(Math.round((outputPotential / Math.max(1, operatingCost)) * 1000), 0, 100);
+}
+
+export function deriveBatchResult({
+  batchCore,
+  accumulators,
+  lifecycleState,
+  warnings = [],
+}: {
+  batchCore: Readonly<BatchCoreState>;
+  accumulators: Readonly<BatchOutcomeAccumulators>;
+  lifecycleState: EngineBatchLifecycleState;
+  warnings?: readonly EngineWarningKey[];
+}): EngineBatchResult {
+  const maturity = clamp(batchCore.maturity, 0, 100);
+  const outputStrength = clamp(batchCore.outputPotential * 0.72 + batchCore.vigor * 0.28, 0, 100);
+  const stressControl = clamp(100 - batchCore.stress, 0, 100);
+  const warningPressure = deriveWarningPressure(accumulators, warnings);
+  const stability = clamp(100 - warningPressure, 0, 100);
+  const baseScore =
+    maturity * 0.34
+    + outputStrength * 0.28
+    + stressControl * 0.20
+    + accumulators.efficiencyScore * 0.12
+    + stability * 0.06;
+  const maturityGate = 0.45 + maturity * 0.0055;
+  const stressDrag = batchCore.stress >= 70 ? (batchCore.stress - 70) * 0.35 : 0;
+  const warningDrag = warningPressure >= 45 ? (warningPressure - 45) * 0.12 : 0;
+  const batchScore = round(clamp(baseScore * maturityGate - stressDrag - warningDrag, 0, 100));
+
+  return {
+    batchScore,
+    grade: gradeForScore(batchScore),
+    resultReasons: deriveBatchResultReasons(batchCore, accumulators, warningPressure),
+    completionRecommendation: deriveCompletionRecommendation(batchCore, lifecycleState, warningPressure),
+  };
+}
+
+function deriveCompletionRecommendation(
+  batchCore: Readonly<BatchCoreState>,
+  lifecycleState: EngineBatchLifecycleState,
+  warningPressure: number,
+): EngineCompletionRecommendation {
+  if (batchCore.stress >= 70 && (batchCore.maturity >= NEAR_READY_MATURITY || lifecycleState === 'ready')) {
+    return 'overdue-risk';
+  }
+
+  if (warningPressure >= 65 && batchCore.maturity >= NEAR_READY_MATURITY) {
+    return 'overdue-risk';
+  }
+
+  if (lifecycleState === 'ready' || batchCore.maturity >= READY_MATURITY) {
+    return 'ready';
+  }
+
+  return 'wait';
+}
+
+function deriveBatchResultReasons(
+  batchCore: Readonly<BatchCoreState>,
+  accumulators: Readonly<BatchOutcomeAccumulators>,
+  warningPressure: number,
+): EngineBatchResultReasonCode[] {
+  const reasons: EngineBatchResultReasonCode[] = [];
+
+  if (batchCore.maturity < READY_MATURITY) reasons.push('completed_early');
+  if (batchCore.maturity < 70) reasons.push('maturity_low');
+  if (batchCore.outputPotential < 55 || batchCore.vigor < 45) reasons.push('output_potential_limited');
+  if (batchCore.maturity < 70 && accumulators.efficiencyScore >= 75) reasons.push('cost_efficient_but_underdeveloped');
+  if (batchCore.stress >= 70) reasons.push('stress_high');
+  if (accumulators.efficiencyScore < 45 && accumulators.operatingCost > 0) reasons.push('cost_heavy');
+  if (warningPressure >= 45) reasons.push('warning_pressure');
+
+  if (reasons.length === 0) reasons.push('stable_run');
+
+  return reasons.slice(0, RESULT_REASON_LIMIT);
+}
+
+function deriveWarningPressure(
+  accumulators: Readonly<BatchOutcomeAccumulators>,
+  warnings: readonly EngineWarningKey[],
+): number {
+  const elapsedTicks = Math.max(1, accumulators.elapsedTicks);
+  const accumulatedPressure = (accumulators.warningTicks / elapsedTicks) * 100;
+  const currentPressure = Math.min(warnings.length, 4) * 15;
+
+  return clamp(accumulatedPressure * 0.7 + currentPressure * 0.3, 0, 100);
+}
+
+function gradeForScore(score: number): EngineBatchGrade {
+  if (score >= 90) return 'S';
+  if (score >= 80) return 'A';
+  if (score >= 65) return 'B';
+  if (score >= 50) return 'C';
+  return 'D';
 }
 
 function advanceRoomEnvironment(

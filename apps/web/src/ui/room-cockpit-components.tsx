@@ -483,6 +483,15 @@ function BatchReportInspector({
         <b className={`status-pill status-${report.finalStatus}`}>Final Status: {titleCase(report.finalStatus)}</b>
       </section>
       <ReportSection
+        title="Batch Result"
+        rows={[
+          ['Score', `${report.batchScore}/100`],
+          ['Grade', report.grade],
+          ['Recommendation', recommendationLabel(report.completionRecommendation)],
+          ['Outcome', resultReasonLabel(report.resultReasons[0] ?? 'stable_run')],
+        ]}
+      />
+      <ReportSection
         title="Harvest Outcome"
         rows={[
           ['Yield Estimate', `${report.yieldEstimate} units`],
@@ -512,6 +521,11 @@ function BatchReportInspector({
       <article className="report-summary-copy">
         <span className="label">Summary</span>
         <strong>{report.summary}</strong>
+        <div className="report-reason-list">
+          {report.resultReasons.slice(0, 3).map((reason) => (
+            <span key={reason}>{resultReasonLabel(reason)}</span>
+          ))}
+        </div>
       </article>
       <footer className="report-action-footer">
         <button className="lifecycle-action-button" type="button" onClick={onBack}>
@@ -572,6 +586,35 @@ function ReportSection({ title, rows }: { title: string; rows: [string, string][
       </dl>
     </section>
   );
+}
+
+function recommendationLabel(recommendation: BatchReport['completionRecommendation']): string {
+  if (recommendation === 'overdue-risk') return 'Risky wait';
+  if (recommendation === 'ready') return 'Ready';
+  return 'Wait';
+}
+
+function resultReasonLabel(reason: BatchReport['resultReasons'][number]): string {
+  switch (reason) {
+    case 'completed_early':
+      return 'Completed early';
+    case 'maturity_low':
+      return 'Low maturity';
+    case 'output_potential_limited':
+      return 'Limited output';
+    case 'cost_efficient_but_underdeveloped':
+      return 'Efficient but early';
+    case 'stress_high':
+      return 'High stress';
+    case 'cost_heavy':
+      return 'Cost heavy';
+    case 'warning_pressure':
+      return 'Warning pressure';
+    case 'stable_run':
+      return 'Stable run';
+    default:
+      return assertNever(reason);
+  }
 }
 
 function ControlledSystemInspector({
@@ -684,6 +727,7 @@ function CanopyInspector({
   const canopy = capacityById(state.roomOverview.capacity, 'canopy-tables');
   const runtime = state.batchRuntime;
   const core = runtime.batchCore;
+  const loop = runtime.loopSummary;
   const report = runtime.report;
   const lifecycleStatus = lifecycleStatusLevel(runtime.lifecycleState, report);
   const feedback = feedbackHintsForObject(state, 'canopy');
@@ -712,9 +756,9 @@ function CanopyInspector({
     <div className="inspector-stack canopy-workspace">
       <section className="canopy-batch-overview" aria-label="Current batch">
         <article>
-          <span className="label">Current Batch</span>
-          <strong>{state.roomOverview.batchId}</strong>
-          <small>{state.roomOverview.roomId} / {state.roomOverview.zoneId}</small>
+          <span className="label">{loop.objectiveLabel}</span>
+          <strong>{loop.outlook}</strong>
+          <small>{loop.objectiveDetail}</small>
         </article>
         <article>
           <span className="label">Maturity</span>
@@ -731,6 +775,28 @@ function CanopyInspector({
           <strong>{Math.round(core.outputPotential)}/100</strong>
           <ProgressBar value={runtime.cycleProgress} />
         </article>
+      </section>
+
+      <section className={`batch-objective-panel status-${loop.readinessStatus === 'risky' ? 'warning' : lifecycleStatus}`} aria-label="Batch objective">
+        <div>
+          <span className="label">Current Batch</span>
+          <strong>{state.roomOverview.batchId}</strong>
+          <small>{state.roomOverview.roomId} / {state.roomOverview.zoneId}</small>
+        </div>
+        <dl>
+          <div>
+            <dt>Recommendation</dt>
+            <dd>{recommendationLabel(loop.recommendation)}</dd>
+          </div>
+          <div>
+            <dt>Complete Now</dt>
+            <dd>{loop.completionHint}</dd>
+          </div>
+          <div>
+            <dt>Readiness</dt>
+            <dd>{titleCase(loop.readinessStatus)}</dd>
+          </div>
+        </dl>
       </section>
 
       <BatchPerformanceSummary accumulators={runtime.accumulators} />
@@ -750,24 +816,25 @@ function CanopyInspector({
             ['State', lifecycleStateLabel(runtime.lifecycleState)],
             ['Phase', runtime.phase],
             ['Batch Day', `${runtime.batchDay} of ${runtime.cycleLengthDays}`],
+            ['Outlook', loop.outlook],
+            ['Recommendation', recommendationLabel(loop.recommendation)],
             ['Output Potential', `${Math.round(core.outputPotential)}/100`],
             ['Report', report ? 'Available' : 'Not available'],
           ]}
         />
         <div className="lifecycle-actions">
-          {runtime.lifecycleState === 'active' ? (
+          {runtime.lifecycleState === 'active' || runtime.lifecycleState === 'ready' ? (
             <>
-              <button className="lifecycle-action-button lifecycle-action-disabled" type="button" disabled>
-                <Icon name="play_arrow" size="sm" />
-                <span>Start Next Batch</span>
-              </button>
-              <small>Current batch must be completed first.</small>
-            </>
-          ) : runtime.lifecycleState === 'ready' ? (
-            <button className="lifecycle-action-button lifecycle-action-warning" type="button" onClick={onCompleteBatch}>
+            <button
+              className={loop.recommendation === 'wait' ? 'lifecycle-action-button' : 'lifecycle-action-button lifecycle-action-warning'}
+              type="button"
+              onClick={onCompleteBatch}
+            >
               <Icon name="task_alt" size="sm" />
               <span>Complete Batch</span>
             </button>
+            <small>{loop.completionHint}</small>
+            </>
           ) : (
             <>
               <button
@@ -800,16 +867,16 @@ function CanopyInspector({
           </div>
           <dl>
             <div>
-              <dt>Final Status</dt>
-              <dd className={`status-text status-${report.finalStatus}`}>{titleCase(report.finalStatus)}</dd>
+              <dt>Grade</dt>
+              <dd className={`status-text status-${report.finalStatus}`}>{report.grade}</dd>
             </div>
             <div>
-              <dt>Yield Estimate</dt>
-              <dd>{report.yieldEstimate} units</dd>
+              <dt>Score</dt>
+              <dd>{report.batchScore}/100</dd>
             </div>
             <div>
-              <dt>Quality Estimate</dt>
-              <dd>{report.qualityEstimate}%</dd>
+              <dt>Reason</dt>
+              <dd>{resultReasonLabel(report.resultReasons[0] ?? 'stable_run')}</dd>
             </div>
           </dl>
         </section>
@@ -843,12 +910,12 @@ function RecentBatchReports({
               </div>
               <dl>
                 <div>
-                  <dt>Final Status</dt>
-                  <dd className={`status-text status-${report.finalStatus}`}>{titleCase(report.finalStatus)}</dd>
+                  <dt>Grade</dt>
+                  <dd className={`status-text status-${report.finalStatus}`}>{report.grade}</dd>
                 </div>
                 <div>
-                  <dt>Quality</dt>
-                  <dd>{report.qualityEstimate}%</dd>
+                  <dt>Score</dt>
+                  <dd>{report.batchScore}/100</dd>
                 </div>
               </dl>
               <button className="report-row-action" type="button" onClick={() => onViewReport(report)}>
@@ -1049,7 +1116,7 @@ export function ReportToast({
       <Icon name="assignment_turned_in" size="sm" filled />
       <div>
         <strong>New batch report available</strong>
-        <span>Batch {report.batchId} completed on Day {report.completedDay}.</span>
+        <span>Batch {report.batchId}: Grade {report.grade}, {report.batchScore}/100.</span>
       </div>
       <button className="report-toast-action" type="button" onClick={() => onViewReport(report)}>
         <span>View Report</span>
@@ -1222,4 +1289,8 @@ function ProgressBar({ value }: { value: number }) {
       <span style={{ width: `${progress}%` }} />
     </div>
   );
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled value: ${value}`);
 }

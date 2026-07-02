@@ -108,6 +108,15 @@ export function rehydrateOperationsCockpit(
         readyForReview: lifecycleState === 'ready',
         batchCore,
         accumulators: createInitialBatchOutcomeAccumulators(),
+        loopSummary: {
+          objectiveLabel: 'Run Target',
+          objectiveDetail: 'Reach readiness with controlled stress and cost.',
+          outlook: 'Building',
+          recommendation: 'wait',
+          completionHint: 'Early result',
+          readinessStatus: 'building',
+          blockers: ['completed_early', 'maturity_low'],
+        },
       },
       batchStatus: rehydrateBatchStatus(blueprint, batchDay, cycleProgress, phase),
       environmentalTelemetry: [

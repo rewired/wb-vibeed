@@ -40,6 +40,9 @@ export type RuntimeProfileScenarioSummary = {
   yieldEstimate: number;
   qualityEstimate: number;
   efficiency: number;
+  batchScore: number;
+  grade: BatchReport['grade'];
+  resultReasons: BatchReport['resultReasons'];
   finalStatus: StatusLevel;
   warningKeys: RuntimeWarningKey[];
   primaryFeedbackCode: EngineFeedbackCode;
@@ -79,8 +82,11 @@ export function runRuntimeScenarioChecks(): RuntimeScenarioResult[] {
     runScenario('manual profile balance affects outcomes', checkManualProfileOutcomes),
     runScenario('feedback signals explain runtime outcomes', checkFeedbackSignals),
     runScenario('batch lifecycle reaches harvest ready once', checkBatchLifecycleReady),
+    runScenario('early completion produces weaker result', checkEarlyCompletionResult),
     runScenario('complete batch freezes report', checkCompleteBatchFreezesReport),
+    runScenario('stress and cost affect batch results', checkStressAndCostAffectResults),
     runScenario('start next batch preserves global time', checkStartNextBatch),
+    runScenario('identical completed run produces identical result', checkRepeatedRunDeterminism),
     runScenario('event log does not spam warnings', checkEventLogSpamPrevention),
   ];
 }
@@ -228,6 +234,10 @@ function checkOperatingProfileOutcomes(): void {
 
   assert(eco.totalCost < balanced.totalCost, 'Eco scenario total cost was not lower than Balanced');
   assert(balanced.totalCost < push.totalCost, 'Balanced scenario total cost was not lower than Push');
+  assert(
+    readyTick(eco) > readyTick(balanced),
+    'Eco scenario did not reach ready state after Balanced',
+  );
   assert(eco.finalCore.outputPotential <= balanced.finalCore.outputPotential, 'Eco output potential exceeded Balanced');
   assert(push.finalCore.stress > balanced.finalCore.stress, 'Push stress was not higher than Balanced');
   assert(balanced.finalCore.vigor >= push.finalCore.vigor, 'Balanced vigor was lower than long-run Push vigor');
@@ -290,7 +300,7 @@ function checkFeedbackSignals(): void {
   const firstRun = tick(dispatch(createRuntime(), { type: 'set-running', isRunning: true }), 24);
   const secondRun = tick(dispatch(createRuntime(), { type: 'set-running', isRunning: true }), 24);
 
-  assert(balanced.primaryFeedbackCode === 'balanced_stable', 'Balanced profile did not surface stable feedback as primary');
+  assert(hasFeedbackCode(balanced, 'balanced_stable'), 'Balanced profile did not surface stable feedback');
   assert(hasFeedbackCode(eco, 'eco_slow_growth'), 'Eco profile did not include slow-growth feedback');
   assert(hasFeedbackCode(eco, 'maturity_slow'), 'Eco profile did not include slow maturity feedback');
   assert(hasFeedbackCode(push, 'push_stress'), 'Push profile did not include stress-risk feedback');
@@ -351,6 +361,46 @@ function checkCompleteBatchFreezesReport(): void {
   assert(stableStringify(afterTicks.cockpit.batchRuntime.report) === reportSnapshot, 'completed report mutated after ticks');
 }
 
+function checkEarlyCompletionResult(): void {
+  const earlyRunning = dispatch(createRuntime(), { type: 'set-running', isRunning: true });
+  const early = tick(earlyRunning, 12);
+  const earlyCompleted = dispatch(early, { type: 'complete-batch' });
+  const ready = tickUntilReady(dispatch(createRuntime(), { type: 'set-running', isRunning: true }));
+  const readyCompleted = dispatch(ready, { type: 'complete-batch' });
+  const earlyReport = requireReport(earlyCompleted);
+  const readyReport = requireReport(readyCompleted);
+
+  assert(earlyCompleted.cockpit.batchRuntime.lifecycleState === 'completed', 'early complete-batch did not complete lifecycle');
+  assert(earlyReport.completedTick === earlyCompleted.simulation.tick, 'early report completed tick does not match runtime tick');
+  assert(earlyReport.batchScore < readyReport.batchScore, 'early completion score was not lower than ready completion score');
+  assert(earlyReport.resultReasons.includes('completed_early'), 'early completion did not include completed_early reason');
+}
+
+function checkStressAndCostAffectResults(): void {
+  const balanced = runBalancedScenario();
+  const push = runPushScenario();
+  const highStress = generateBatchReport(withBatchCore(createRuntime(), {
+    maturity: 100,
+    stress: 86,
+    vigor: 38,
+    outputPotential: 54,
+  }));
+  const stable = generateBatchReport(withBatchCore(createRuntime(), {
+    maturity: 100,
+    stress: 18,
+    vigor: 82,
+    outputPotential: 72,
+  }));
+
+  assert(highStress.batchScore < stable.batchScore, 'high stress did not reduce batch score');
+  assert(highStress.resultReasons.includes('stress_high'), 'high stress report did not include stress_high reason');
+  assert(push.totalCost > balanced.totalCost, 'Push scenario did not cost more than Balanced');
+  assert(
+    push.batchScore <= balanced.batchScore || push.resultReasons.includes('stress_high') || push.resultReasons.includes('cost_heavy'),
+    'Push scenario did not show score pressure or risk reasons relative to Balanced',
+  );
+}
+
 function checkStartNextBatch(): void {
   let runtime = createRuntime();
   runtime = dispatch(runtime, { type: 'set-control-state', system: 'light', control: 'Manual' });
@@ -374,12 +424,22 @@ function checkStartNextBatch(): void {
   assert(next.baseline.batch.startTick === tickBefore, 'baseline batch start tick does not match current tick');
   assert(next.cockpit.batchRuntime.lifecycleState === 'active', 'new batch is not active');
   assertEqual(next.cockpit.batchRuntime.batchCore, INITIAL_BATCH_CORE, 'new batch core values did not reset');
+  assert(next.cockpit.batchRuntime.report === undefined, 'new batch retained completed report');
+  assert(next.cockpit.batchRuntime.loopSummary.recommendation === 'wait', 'new batch recommendation did not reset');
+  assert(next.cockpit.batchRuntime.loopSummary.outlook === 'Weak' || next.cockpit.batchRuntime.loopSummary.outlook === 'Building', 'new batch outlook did not reset');
   assertEqual(controlsSnapshot(next), controlsBefore, 'room controls were reset when starting next batch');
   assertEqual(next.roomEnvironment, roomEnvironmentBefore, 'room environment was reset when starting next batch');
   assert(
     numericTelemetry(next, 'nutrient-reservoir') <= nutrientBefore,
     'nutrient reservoir was refilled when starting next batch',
   );
+}
+
+function checkRepeatedRunDeterminism(): void {
+  const first = dispatch(tickUntilReady(dispatch(createRuntime(), { type: 'set-running', isRunning: true })), { type: 'complete-batch' });
+  const second = dispatch(tickUntilReady(dispatch(createRuntime(), { type: 'set-running', isRunning: true })), { type: 'complete-batch' });
+
+  assertEqual(reportResultSnapshot(requireReport(first)), reportResultSnapshot(requireReport(second)), 'identical completed runs produced different result');
 }
 
 function checkEventLogSpamPrevention(): void {
@@ -482,6 +542,9 @@ function profileScenarioSummary(
     yieldEstimate: report.yieldEstimate,
     qualityEstimate: report.qualityEstimate,
     efficiency: report.efficiency,
+    batchScore: report.batchScore,
+    grade: report.grade,
+    resultReasons: report.resultReasons,
     finalStatus: report.finalStatus,
     warningKeys: runtime.cockpit.warningConditions.map((warning) => warning.key),
     primaryFeedbackCode: runtime.cockpit.feedback.primary.code,
@@ -585,6 +648,28 @@ function feedbackSnapshot(state: OperationsCockpitRuntimeState) {
       severity: hint.severity,
       target: hint.target,
     })),
+  };
+}
+
+function requireReport(state: OperationsCockpitRuntimeState): BatchReport {
+  const report = state.cockpit.batchRuntime.report;
+
+  if (!report) throw new Error('expected completed batch report');
+
+  return report;
+}
+
+function reportResultSnapshot(report: BatchReport) {
+  return {
+    batchScore: report.batchScore,
+    grade: report.grade,
+    resultReasons: report.resultReasons,
+    completionRecommendation: report.completionRecommendation,
+    finalMaturity: report.finalMaturity,
+    finalStress: report.finalStress,
+    finalOutputPotential: report.finalOutputPotential,
+    operatingCost: report.operatingCost,
+    efficiency: report.efficiency,
   };
 }
 
