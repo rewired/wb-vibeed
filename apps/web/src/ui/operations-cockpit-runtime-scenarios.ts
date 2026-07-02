@@ -7,6 +7,7 @@ import {
   generateBatchReport,
   getModeTarget,
 } from './operations-cockpit-runtime';
+import type { EngineFeedbackCode } from '@wb/engine';
 import type {
   BatchCoreState,
   BatchReport,
@@ -41,6 +42,8 @@ export type RuntimeProfileScenarioSummary = {
   efficiency: number;
   finalStatus: StatusLevel;
   warningKeys: RuntimeWarningKey[];
+  primaryFeedbackCode: EngineFeedbackCode;
+  feedbackCodes: EngineFeedbackCode[];
   finalEnvironment: RoomEnvironmentState;
   environmentDeviation: number;
 };
@@ -74,6 +77,7 @@ export function runRuntimeScenarioChecks(): RuntimeScenarioResult[] {
     runScenario('mode targets are ordered', checkModeTargetOrdering),
     runScenario('operating profiles have directional outcomes', checkOperatingProfileOutcomes),
     runScenario('manual profile balance affects outcomes', checkManualProfileOutcomes),
+    runScenario('feedback signals explain runtime outcomes', checkFeedbackSignals),
     runScenario('batch lifecycle reaches harvest ready once', checkBatchLifecycleReady),
     runScenario('complete batch freezes report', checkCompleteBatchFreezesReport),
     runScenario('start next batch preserves global time', checkStartNextBatch),
@@ -260,6 +264,63 @@ function checkManualProfileOutcomes(): void {
   );
 }
 
+function checkFeedbackSignals(): void {
+  const balanced = feedbackAfterControls({
+    light: { mode: 'Balanced', control: 'Auto', manualValue: 65 },
+    climate: { mode: 'Balanced', control: 'Auto', manualValue: 65 },
+    irrigation: { mode: 'Balanced', control: 'Auto', manualValue: 65 },
+  }, 1);
+  const eco = feedbackAfterControls({
+    light: { mode: 'Eco', control: 'Auto', manualValue: 65 },
+    climate: { mode: 'Eco', control: 'Auto', manualValue: 65 },
+    irrigation: { mode: 'Eco', control: 'Auto', manualValue: 65 },
+  }, 6);
+  const push = feedbackAfterControls({
+    light: { mode: 'Push', control: 'Auto', manualValue: 65 },
+    climate: { mode: 'Push', control: 'Auto', manualValue: 65 },
+    irrigation: { mode: 'Push', control: 'Auto', manualValue: 65 },
+  }, 12);
+  const badManual = feedbackAfterControls({
+    light: { mode: 'Balanced', control: 'Manual', manualValue: 100 },
+    climate: { mode: 'Balanced', control: 'Manual', manualValue: 0 },
+    irrigation: { mode: 'Balanced', control: 'Manual', manualValue: 100 },
+  }, 36);
+  const early = createRuntime();
+  const nearReady = withBatchCore(createRuntime(), { maturity: 86, stress: 24, vigor: 76, outputPotential: 58 });
+  const firstRun = tick(dispatch(createRuntime(), { type: 'set-running', isRunning: true }), 24);
+  const secondRun = tick(dispatch(createRuntime(), { type: 'set-running', isRunning: true }), 24);
+
+  assert(balanced.primaryFeedbackCode === 'balanced_stable', 'Balanced profile did not surface stable feedback as primary');
+  assert(hasFeedbackCode(eco, 'eco_slow_growth'), 'Eco profile did not include slow-growth feedback');
+  assert(hasFeedbackCode(eco, 'maturity_slow'), 'Eco profile did not include slow maturity feedback');
+  assert(hasFeedbackCode(push, 'push_stress'), 'Push profile did not include stress-risk feedback');
+  assert(hasFeedbackCode(push, 'maturity_fast'), 'Push profile did not include fast maturity feedback');
+  assert(
+    hasFeedbackCode(badManual, 'climate_drift') || hasFeedbackCode(badManual, 'quality_pressure'),
+    'Bad manual profile did not include drift or output-pressure feedback',
+  );
+  assert(
+    early.cockpit.feedback.primary.code !== 'harvest_not_mature',
+    'Harvest blocker became primary before near readiness',
+  );
+  assert(
+    nearReady.cockpit.feedback.primary.code === 'harvest_not_mature',
+    'Near-ready batch did not surface maturity blocker as primary',
+  );
+  assert(
+    stableStringify(feedbackSnapshot(firstRun)) === stableStringify(feedbackSnapshot(secondRun)),
+    'Identical runs produced different feedback snapshots',
+  );
+}
+
+function feedbackAfterControls(controls: CockpitControlState, ticksRun: number): RuntimeProfileScenarioSummary {
+  let runtime = applyScenarioControls(createRuntime(), controls);
+  runtime = dispatch(runtime, { type: 'set-running', isRunning: true });
+  runtime = tick(runtime, ticksRun);
+
+  return profileScenarioSummary('Manual Balanced', runtime, ticksRun, undefined, generateBatchReport(runtime));
+}
+
 function checkBatchLifecycleReady(): void {
   const ready = tickUntilReady(dispatch(createRuntime(), { type: 'set-running', isRunning: true }));
   const readyEventCount = countWarningEvents(ready, 'cycle-ready');
@@ -423,6 +484,8 @@ function profileScenarioSummary(
     efficiency: report.efficiency,
     finalStatus: report.finalStatus,
     warningKeys: runtime.cockpit.warningConditions.map((warning) => warning.key),
+    primaryFeedbackCode: runtime.cockpit.feedback.primary.code,
+    feedbackCodes: feedbackCodes(runtime),
     finalEnvironment: runtime.roomEnvironment,
     environmentDeviation: deriveEnvironmentDeviation(runtime.roomEnvironment),
   };
@@ -484,8 +547,45 @@ function telemetryAfterManualTicks(
   return numericTelemetry(state, CONTROL_TELEMETRY[system]);
 }
 
+function withBatchCore(
+  state: OperationsCockpitRuntimeState,
+  batchCore: BatchCoreState,
+): OperationsCockpitRuntimeState {
+  const nextSpeed = state.simulation.speed === 1 ? 2 : 1;
+
+  return advanceOperationsCockpitRuntime({
+    ...state,
+    cockpit: {
+      ...state.cockpit,
+      batchRuntime: {
+        ...state.cockpit.batchRuntime,
+        batchCore,
+      },
+    },
+  }, { type: 'set-speed', speed: nextSpeed });
+}
+
 function readyTick(summary: RuntimeProfileScenarioSummary): number {
   return summary.firstReadyTick ?? Number.POSITIVE_INFINITY;
+}
+
+function hasFeedbackCode(summary: RuntimeProfileScenarioSummary, code: EngineFeedbackCode): boolean {
+  return summary.feedbackCodes.includes(code);
+}
+
+function feedbackCodes(state: OperationsCockpitRuntimeState): EngineFeedbackCode[] {
+  return [state.cockpit.feedback.primary, ...state.cockpit.feedback.secondary].map((hint) => hint.code);
+}
+
+function feedbackSnapshot(state: OperationsCockpitRuntimeState) {
+  return {
+    primary: state.cockpit.feedback.primary.code,
+    secondary: state.cockpit.feedback.secondary.map((hint) => ({
+      code: hint.code,
+      severity: hint.severity,
+      target: hint.target,
+    })),
+  };
 }
 
 function controlForSystem(state: OperationsCockpitRuntimeState, system: OperationsCockpitControlSystem) {
@@ -545,6 +645,7 @@ function runtimeSnapshot(state: OperationsCockpitRuntimeState) {
     telemetryTrends: state.cockpit.telemetryTrends,
     eventLog: state.cockpit.eventLog.map(eventSnapshot),
     warningConditions: state.cockpit.warningConditions,
+    feedback: feedbackSnapshot(state),
     energyCost: state.cockpit.energyCost,
     utilityStatus: state.cockpit.utilityStatus,
     roomEnvironment: state.roomEnvironment,

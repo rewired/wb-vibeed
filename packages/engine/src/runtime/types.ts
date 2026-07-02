@@ -84,6 +84,35 @@ export type EngineWarningKey =
   | 'low-vigor'
   | 'nutrient-reservoir-low';
 
+export type EngineFeedbackCode =
+  | 'light_under_target'
+  | 'climate_drift'
+  | 'irrigation_under_target'
+  | 'nutrient_drift'
+  | 'push_stress'
+  | 'eco_slow_growth'
+  | 'balanced_stable'
+  | 'harvest_not_mature'
+  | 'harvest_stress_too_high'
+  | 'quality_pressure'
+  | 'maturity_fast'
+  | 'maturity_slow';
+
+export type EngineFeedbackSeverity = 'info' | 'warning' | 'critical';
+export type EngineFeedbackTarget = 'canopy' | 'lighting' | 'climate' | 'irrigation' | 'nutrient' | 'sensors';
+
+export interface EngineFeedbackSignal {
+  code: EngineFeedbackCode;
+  severity: EngineFeedbackSeverity;
+  priority: number;
+  target?: EngineFeedbackTarget;
+}
+
+export interface RoomFeedbackSignals {
+  primary: EngineFeedbackSignal;
+  signals: EngineFeedbackSignal[];
+}
+
 export interface ResolvedActuatorTargets {
   light: number;
   climate: number;

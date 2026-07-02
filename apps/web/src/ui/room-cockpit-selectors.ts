@@ -3,6 +3,7 @@ import { titleCase } from './room-cockpit-formatters';
 import type {
   BatchLifecycleState,
   BatchReport,
+  CockpitFeedbackHint,
   ControlTileState,
   EventLogEntryState,
   MetricTileState,
@@ -205,6 +206,30 @@ export function batchCycleSummary(state: OperationsCockpitState): BatchCycleSumm
     readyForReview: runtime.readyForReview,
     status: cycleProgress?.status ?? state.roomOverview.status,
   };
+}
+
+export function feedbackHintsForObject(
+  state: OperationsCockpitState,
+  selectedObject: SelectedRoomObject,
+): CockpitFeedbackHint[] {
+  const hints = [state.feedback.primary, ...state.feedback.secondary];
+  const uniqueHints: CockpitFeedbackHint[] = [];
+
+  for (const hint of hints) {
+    if (!isFeedbackRelevantToObject(hint, selectedObject)) continue;
+    if (uniqueHints.some((item) => item.code === hint.code)) continue;
+
+    uniqueHints.push(hint);
+  }
+
+  return uniqueHints.slice(0, 4);
+}
+
+function isFeedbackRelevantToObject(hint: CockpitFeedbackHint, selectedObject: SelectedRoomObject): boolean {
+  if (!hint.target) return true;
+  if (hint.target === selectedObject) return true;
+
+  return selectedObject === 'sensors' && hint.code === 'climate_drift';
 }
 
 export function lifecycleStateLabel(state: BatchLifecycleState): string {

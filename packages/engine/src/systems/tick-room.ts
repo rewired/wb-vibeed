@@ -2,9 +2,11 @@ import type {
   BatchCoreState,
   BatchOutcomeAccumulators,
   EngineBatchLifecycleState,
+  EngineFeedbackSignal,
   EngineOperatingMode,
   EngineWarningKey,
   ResolvedActuatorTargets,
+  RoomFeedbackSignals,
   RoomEconomyState,
   RoomEnvironmentState,
   RoomSimulationCoreState,
@@ -13,6 +15,13 @@ import type {
 const COST_PER_KWH = 0.34;
 const NUTRIENT_REVIEW_THRESHOLD = 20;
 const IDEAL_ENVIRONMENT_INDEX = 65;
+const ECO_PRESSURE_MAX = 45;
+const PUSH_PRESSURE_MIN = 78;
+const FAST_MATURITY_PRESSURE_MIN = 72;
+const SLOW_MATURITY_PRESSURE_MAX = 48;
+const DRIFT_THRESHOLD = 24;
+const UNDER_TARGET_THRESHOLD = 50;
+const NEAR_READY_MATURITY = 85;
 const ENVIRONMENT_RATES = {
   lightIndex: 0.35,
   airflowIndex: 0.22,
@@ -107,6 +116,70 @@ export function deriveRoomEconomy(
     powerNow,
     dailyEnergy,
     dailyCost,
+  };
+}
+
+export function deriveRoomFeedbackSignals(state: Readonly<RoomSimulationCoreState>): RoomFeedbackSignals {
+  const signals: EngineFeedbackSignal[] = [];
+  const environmentDeviation = deriveEnvironmentDeviation(state.roomEnvironment);
+  const targetPressure = averageTargetPressure(state.targets);
+  const operatingPressure = averageOperatingPressure(state.roomEnvironment);
+  const lifecycleReady = state.lifecycleState === 'ready' || state.lifecycleState === 'completed';
+  const nearActionableReadiness = lifecycleReady || state.batchCore.maturity >= NEAR_READY_MATURITY;
+
+  if (nearActionableReadiness && state.batchCore.stress >= 70) {
+    signals.push(signal('harvest_stress_too_high', 'warning', 100, 'canopy'));
+  }
+
+  if (nearActionableReadiness && state.batchCore.maturity < 100) {
+    signals.push(signal('harvest_not_mature', 'info', 96, 'canopy'));
+  }
+
+  if (isOutputPotentialPressured(state.batchCore)) {
+    signals.push(signal('quality_pressure', state.batchCore.stress >= 70 ? 'critical' : 'warning', 90, 'canopy'));
+  }
+
+  if (targetPressure >= PUSH_PRESSURE_MIN || operatingPressure >= PUSH_PRESSURE_MIN) {
+    signals.push(signal('push_stress', state.batchCore.stress >= 55 ? 'warning' : 'info', 82, 'canopy'));
+  }
+
+  if (targetPressure <= ECO_PRESSURE_MAX) {
+    signals.push(signal('eco_slow_growth', 'info', 80, 'canopy'));
+  }
+
+  if (state.roomEnvironment.nutrientReservoir <= NUTRIENT_REVIEW_THRESHOLD) {
+    signals.push(signal('nutrient_drift', 'warning', 74, 'nutrient'));
+  }
+
+  if (isClimateDrifting(state.roomEnvironment, environmentDeviation)) {
+    signals.push(signal('climate_drift', 'warning', 70, 'climate'));
+  }
+
+  if (state.roomEnvironment.lightIndex <= UNDER_TARGET_THRESHOLD || state.targets.light <= ECO_PRESSURE_MAX) {
+    signals.push(signal('light_under_target', 'info', 66, 'lighting'));
+  }
+
+  if (state.roomEnvironment.irrigationIndex <= UNDER_TARGET_THRESHOLD || state.targets.irrigation <= ECO_PRESSURE_MAX) {
+    signals.push(signal('irrigation_under_target', 'info', 64, 'irrigation'));
+  }
+
+  if (operatingPressure >= FAST_MATURITY_PRESSURE_MIN) {
+    signals.push(signal('maturity_fast', 'info', 58, 'canopy'));
+  }
+
+  if (operatingPressure <= SLOW_MATURITY_PRESSURE_MAX) {
+    signals.push(signal('maturity_slow', 'info', 56, 'canopy'));
+  }
+
+  if (signals.length === 0 || isBalancedStableState(state, environmentDeviation, targetPressure)) {
+    signals.push(signal('balanced_stable', 'info', 10, 'canopy'));
+  }
+
+  const sortedSignals = sortSignals(signals);
+
+  return {
+    primary: sortedSignals[0] ?? signal('balanced_stable', 'info', 10, 'canopy'),
+    signals: sortedSignals,
   };
 }
 
@@ -262,6 +335,61 @@ function accumulateBatchTick({
 
 function shouldAdvanceBatch(lifecycleState: EngineBatchLifecycleState): boolean {
   return lifecycleState === 'active' || lifecycleState === 'ready';
+}
+
+function signal(
+  code: EngineFeedbackSignal['code'],
+  severity: EngineFeedbackSignal['severity'],
+  priority: number,
+  target?: EngineFeedbackSignal['target'],
+): EngineFeedbackSignal {
+  return target ? { code, severity, priority, target } : { code, severity, priority };
+}
+
+function sortSignals(signals: EngineFeedbackSignal[]): EngineFeedbackSignal[] {
+  return [...signals].sort((first, second) => second.priority - first.priority || first.code.localeCompare(second.code));
+}
+
+function isOutputPotentialPressured(batchCore: Readonly<BatchCoreState>): boolean {
+  if (batchCore.stress >= 55) return true;
+  if (batchCore.vigor <= 45) return true;
+  if (batchCore.maturity < 30) return false;
+
+  return batchCore.outputPotential + 12 < batchCore.maturity * 0.65;
+}
+
+function isClimateDrifting(
+  environment: Readonly<RoomEnvironmentState>,
+  environmentDeviation: number,
+): boolean {
+  return (
+    environmentDeviation >= DRIFT_THRESHOLD
+    || distanceFromIdeal(environment.temperatureIndex, IDEAL_ENVIRONMENT_INDEX) >= DRIFT_THRESHOLD
+    || distanceFromIdeal(environment.humidityIndex, IDEAL_ENVIRONMENT_INDEX) >= DRIFT_THRESHOLD
+    || distanceFromIdeal(environment.airflowIndex, IDEAL_ENVIRONMENT_INDEX) >= DRIFT_THRESHOLD
+  );
+}
+
+function isBalancedStableState(
+  state: Readonly<RoomSimulationCoreState>,
+  environmentDeviation: number,
+  targetPressure: number,
+): boolean {
+  return (
+    targetPressure > ECO_PRESSURE_MAX
+    && targetPressure < PUSH_PRESSURE_MIN
+    && environmentDeviation < 18
+    && state.batchCore.stress < 45
+    && state.batchCore.vigor > 45
+  );
+}
+
+function averageTargetPressure(targets: Readonly<ResolvedActuatorTargets>): number {
+  return (targets.light + targets.climate + targets.irrigation) / 3;
+}
+
+function averageOperatingPressure(environment: Readonly<RoomEnvironmentState>): number {
+  return (environment.lightIndex + environment.airflowIndex + environment.irrigationIndex) / 3;
 }
 
 function approach(current: number, target: number, rate: number): number {

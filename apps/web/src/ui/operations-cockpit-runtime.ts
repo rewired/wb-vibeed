@@ -5,17 +5,20 @@ import {
   deriveEfficiencyScore,
   deriveEngineWarningKeys,
   deriveEnvironmentDeviation as deriveEngineEnvironmentDeviation,
+  deriveRoomFeedbackSignals,
   deriveRoomEconomy,
   getOperatingModeTarget,
   tickRoom,
 } from '@wb/engine';
-import type { RoomSimulationCoreState } from '@wb/engine';
+import type { EngineFeedbackCode, EngineFeedbackSignal, RoomSimulationCoreState } from '@wb/engine';
 import type {
   ActuatorTargetState,
   BatchCoreState,
   BatchLifecycleState,
   BatchOutcomeAccumulators,
   BatchReport,
+  CockpitFeedbackHint,
+  CockpitFeedbackState,
   ControlState,
   ControlTileState,
   EventLogEntryState,
@@ -343,6 +346,16 @@ function deriveOperationsCockpitRuntime(
         .filter((warning) => !state.activeWarnings.includes(warning.key))
         .map((warning) => warningEvent(eventSourceState, warning));
   const eventLog = [...warningEvents, ...state.cockpit.eventLog].slice(0, MAX_EVENT_LOG_ENTRIES);
+  const feedback = deriveCockpitFeedback(toRoomSimulationCoreSnapshot({
+    state,
+    actuatorTargets,
+    roomEnvironment,
+    batchCore,
+    lifecycleState,
+    accumulators,
+    economy,
+    simulationTick,
+  }));
 
   return {
     ...state,
@@ -386,6 +399,7 @@ function deriveOperationsCockpitRuntime(
       utilityStatus,
       eventLog,
       warningConditions: warnings,
+      feedback,
     },
   };
 }
@@ -430,6 +444,112 @@ function toRoomSimulationCoreState(
       readyForReview,
     ),
   };
+}
+
+function toRoomSimulationCoreSnapshot({
+  state,
+  actuatorTargets,
+  roomEnvironment,
+  batchCore,
+  lifecycleState,
+  accumulators,
+  economy,
+  simulationTick,
+}: {
+  state: OperationsCockpitRuntimeState;
+  actuatorTargets: ActuatorTargetState;
+  roomEnvironment: RoomSimulationCoreState['roomEnvironment'];
+  batchCore: RoomSimulationCoreState['batchCore'];
+  lifecycleState: RoomSimulationCoreState['lifecycleState'];
+  accumulators: RoomSimulationCoreState['accumulators'];
+  economy: RoomSimulationCoreState['economy'];
+  simulationTick: number;
+}): RoomSimulationCoreState {
+  const environmentDeviation = deriveEnvironmentDeviation(roomEnvironment);
+
+  return {
+    simulation: {
+      tick: simulationTick,
+      ticksPerDay: state.simulation.ticksPerDay,
+      batchStartTick: state.baseline.batch.startTick,
+    },
+    targets: {
+      light: clamp(actuatorTargets.light, 0, 100),
+      climate: clamp(actuatorTargets.climate, 0, 100),
+      irrigation: clamp(actuatorTargets.irrigation, 0, 100),
+    },
+    roomEnvironment,
+    batchCore,
+    lifecycleState,
+    accumulators,
+    baselinePowerNow: state.baseline.energy.powerNow,
+    economy,
+    warnings: deriveEngineWarningKeys(
+      roomEnvironment,
+      environmentDeviation,
+      batchCore,
+      lifecycleState === 'ready',
+    ),
+  };
+}
+
+function deriveCockpitFeedback(core: RoomSimulationCoreState): CockpitFeedbackState {
+  const feedback = deriveRoomFeedbackSignals(core);
+  const hints = feedback.signals.map(translateFeedbackSignal);
+
+  return {
+    primary: translateFeedbackSignal(feedback.primary),
+    secondary: hints.filter((hint) => hint.code !== feedback.primary.code),
+  };
+}
+
+function translateFeedbackSignal(signal: EngineFeedbackSignal): CockpitFeedbackHint {
+  const text = feedbackText(signal.code);
+
+  return {
+    code: signal.code,
+    severity: signal.severity,
+    label: text.label,
+    detail: text.detail,
+    icon: text.icon,
+    ...(signal.target ? { target: signal.target } : {}),
+  };
+}
+
+function feedbackText(code: EngineFeedbackCode): { label: string; detail: string; icon: string } {
+  switch (code) {
+    case 'light_under_target':
+      return { label: 'Light below plan', detail: 'Lower light index is slowing the batch.', icon: 'lightbulb' };
+    case 'climate_drift':
+      return { label: 'Room drift', detail: 'Room indices are pulling away from stable.', icon: 'air' };
+    case 'irrigation_under_target':
+      return { label: 'Flow below plan', detail: 'Lower irrigation index is slowing the batch.', icon: 'water_drop' };
+    case 'nutrient_drift':
+      return { label: 'Reservoir pressure', detail: 'Reservoir index is below the review line.', icon: 'science' };
+    case 'push_stress':
+      return { label: 'Push pressure', detail: 'Push is faster, costlier, and raises stress risk.', icon: 'speed' };
+    case 'eco_slow_growth':
+      return { label: 'Eco pace', detail: 'Eco is stable and efficient, but slower.', icon: 'eco' };
+    case 'balanced_stable':
+      return { label: 'Stable balance', detail: 'Balanced pressure is holding core values steady.', icon: 'check_circle' };
+    case 'harvest_not_mature':
+      return { label: 'Not ready yet', detail: 'Maturity has not reached the review gate.', icon: 'hourglass_empty' };
+    case 'harvest_stress_too_high':
+      return { label: 'Stress blocks review', detail: 'Stress is high for readiness review.', icon: 'warning' };
+    case 'quality_pressure':
+      // The simulation code uses quality_pressure; the cockpit term is Output Potential.
+      return { label: 'Output pressure', detail: 'Stress is reducing output potential.', icon: 'trending_down' };
+    case 'maturity_fast':
+      return { label: 'Fast maturity', detail: 'Higher pressure is accelerating maturity.', icon: 'bolt' };
+    case 'maturity_slow':
+      return { label: 'Slow maturity', detail: 'Lower pressure is slowing maturity.', icon: 'slow_motion_video' };
+    default:
+      return assertNever(code);
+  }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled feedback code: ${value}`);
 }
 
 function resetBatchStatus(items: ProgressTileState[]): ProgressTileState[] {

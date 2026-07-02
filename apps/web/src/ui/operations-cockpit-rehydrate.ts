@@ -1,5 +1,6 @@
 import type {
   BlueprintMetric,
+  CockpitFeedbackState,
   MetricTileState,
   OperationsCockpitBlueprint,
   OperationsCockpitRuntimeState,
@@ -16,6 +17,18 @@ import {
   deriveOperationalPhase,
   initializeOperationsCockpitRuntime,
 } from './operations-cockpit-runtime';
+
+const DEFAULT_FEEDBACK: CockpitFeedbackState = {
+  primary: {
+    code: 'balanced_stable',
+    severity: 'info',
+    label: 'Stable balance',
+    detail: 'Core room values are holding steady.',
+    icon: 'check_circle',
+    target: 'canopy',
+  },
+  secondary: [],
+};
 
 export function rehydrateOperationsCockpit(
   blueprint: OperationsCockpitBlueprint,
@@ -154,6 +167,7 @@ export function rehydrateOperationsCockpit(
         ...entry,
       })),
       warningConditions: [],
+      feedback: DEFAULT_FEEDBACK,
       energyCost: [
         {
           id: 'power-now',

@@ -12,6 +12,8 @@
  * Do not add simulation logic to this file.
  */
 
+import type { EngineFeedbackCode, EngineFeedbackSeverity } from '@wb/engine';
+
 export type StatusLevel = 'normal' | 'warning' | 'critical';
 export type EventSeverity = 'info' | 'warning' | 'critical';
 export type SeverityLevel = EventSeverity;
@@ -178,6 +180,20 @@ export interface WarningConditionState {
   object: SelectedRoomObject;
 }
 
+export interface CockpitFeedbackHint {
+  code: EngineFeedbackCode;
+  severity: EngineFeedbackSeverity;
+  label: string;
+  detail: string;
+  icon: string;
+  target?: SelectedRoomObject;
+}
+
+export interface CockpitFeedbackState {
+  primary: CockpitFeedbackHint;
+  secondary: CockpitFeedbackHint[];
+}
+
 export interface BatchOutcomeAccumulators {
   elapsedTicks: number;
   warningTicks: number;
@@ -269,6 +285,7 @@ export interface OperationsCockpitState {
   telemetryTrends: TrendTileState[];
   eventLog: EventLogEntryState[];
   warningConditions: WarningConditionState[];
+  feedback: CockpitFeedbackState;
 
   energyCost: MetricTileState[];
   utilityStatus: UtilityStatusItemState[];

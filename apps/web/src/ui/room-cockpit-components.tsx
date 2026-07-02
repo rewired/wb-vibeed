@@ -4,6 +4,7 @@ import {
   batchCycleSummary,
   capacityById,
   controlByLabel,
+  feedbackHintsForObject,
   headerStatIcon,
   inspectorHeader,
   isTelemetryKey,
@@ -32,6 +33,7 @@ import {
 import type {
   BatchOutcomeAccumulators,
   BatchReport,
+  CockpitFeedbackHint,
   ControlState,
   ControlTileState,
   EventLogDrawerState,
@@ -207,7 +209,12 @@ export function RoomContext({
       <div className="room-context-grid" aria-label="Active operational context">
         <div className="room-context-strip">
           <ContextFact label="Room Context" value={roomContext} />
-          <ContextFact label="Status" value={titleCase(state.roomOverview.status)} status={state.roomOverview.status} />
+          <ContextFact
+            label="Status"
+            value={titleCase(state.roomOverview.status)}
+            status={state.roomOverview.status}
+            feedback={state.feedback.primary}
+          />
         </div>
         <div className="cycle-context-fields">
           <article className={`context-cycle cycle-progress-field status-${cycle.status}`}>
@@ -231,11 +238,27 @@ export function RoomContext({
   );
 }
 
-function ContextFact({ label, value, status }: { label: string; value: string; status?: StatusLevel }) {
+function ContextFact({
+  label,
+  value,
+  status,
+  feedback,
+}: {
+  label: string;
+  value: string;
+  status?: StatusLevel;
+  feedback?: CockpitFeedbackHint;
+}) {
   return (
     <div className={status ? `context-status status-${status}` : undefined}>
       <span className="label">{label}</span>
       <strong>{value}</strong>
+      {feedback ? (
+        <small className={`primary-feedback-hint severity-${feedback.severity}`}>
+          <Icon name={feedback.icon} size="sm" />
+          <span>{feedback.label}</span>
+        </small>
+      ) : null}
     </div>
   );
 }
@@ -573,6 +596,7 @@ function ControlledSystemInspector({
   onManualValueChange: (controlId: string, value: number) => void;
 }) {
   const lastEvent = lastEventForObject(state.eventLog, system, fallbackEvent);
+  const feedback = feedbackHintsForObject(state, system);
 
   return (
     <div className="system-inspector-grid">
@@ -610,6 +634,7 @@ function ControlledSystemInspector({
               [targetLabel, formatInspectorValue(control.primaryTuning)],
             ]}
           />
+          <FeedbackReadout hints={feedback} />
         </div>
       ) : null}
       <RelatedTelemetry state={state} metricIds={metrics} />
@@ -621,6 +646,7 @@ function ControlledSystemInspector({
 function NutrientInspector({ state }: { state: OperationsCockpitState }) {
   const reservoir = metricById(state.environmentalTelemetry, 'nutrient-reservoir');
   const status = objectRuntimeStatus(state, 'nutrient', 'Online');
+  const feedback = feedbackHintsForObject(state, 'nutrient');
 
   return (
     <div className="inspector-stack">
@@ -632,6 +658,7 @@ function NutrientInspector({ state }: { state: OperationsCockpitState }) {
           ['Review Threshold', reservoir?.reference?.replace('Review Threshold ', '') ?? 'Unavailable'],
         ]}
       />
+      <FeedbackReadout hints={feedback} />
       <LastEvent event={lastEventForObject(state.eventLog, 'nutrient', 'Reservoir connected')} />
     </div>
   );
@@ -659,6 +686,7 @@ function CanopyInspector({
   const core = runtime.batchCore;
   const report = runtime.report;
   const lifecycleStatus = lifecycleStatusLevel(runtime.lifecycleState, report);
+  const feedback = feedbackHintsForObject(state, 'canopy');
   const selectedReport = reportViewState.type === 'open'
     ? reportByKey(completedReports, reportViewState.reportKey) ?? (report && reportKey(report) === reportViewState.reportKey ? report : undefined)
     : undefined;
@@ -706,6 +734,7 @@ function CanopyInspector({
       </section>
 
       <BatchPerformanceSummary accumulators={runtime.accumulators} />
+      <FeedbackReadout hints={feedback} />
 
       <section className={`lifecycle-panel status-${lifecycleStatus}`} aria-label="Batch lifecycle actions">
         <div className="lifecycle-panel-header">
@@ -839,6 +868,7 @@ function RecentBatchReports({
 function SensorsInspector({ state }: { state: OperationsCockpitState }) {
   const sensors = capacityById(state.roomOverview.capacity, 'sensor-points');
   const status = objectRuntimeStatus(state, 'sensors', 'Online');
+  const feedback = feedbackHintsForObject(state, 'sensors');
   const coverageMetricIds: TelemetryKey[] = ['air-temperature', 'relative-humidity', 'co2-index', 'airflow'];
   const coverage = coverageMetricIds
     .map((id) => metricById(state.environmentalTelemetry, id)?.label)
@@ -855,6 +885,7 @@ function SensorsInspector({ state }: { state: OperationsCockpitState }) {
         ]}
       />
       <RelatedTelemetry state={state} metricIds={['air-temperature', 'relative-humidity', 'co2-index', 'airflow']} />
+      <FeedbackReadout hints={feedback} />
       <LastEvent event={lastEventForObject(state.eventLog, 'sensors', 'No recent sensor network event')} />
     </div>
   );
@@ -903,6 +934,24 @@ function InspectorFacts({ facts }: { facts: [string, string][] }) {
         </div>
       ))}
     </dl>
+  );
+}
+
+function FeedbackReadout({ hints }: { hints: CockpitFeedbackHint[] }) {
+  if (hints.length === 0) return null;
+
+  return (
+    <section className="feedback-readout" aria-label="Simulation feedback">
+      {hints.map((hint) => (
+        <article className={`feedback-row severity-${hint.severity}`} key={hint.code}>
+          <Icon name={hint.icon} size="sm" />
+          <span>
+            <strong>{hint.label}</strong>
+            <small>{hint.detail}</small>
+          </span>
+        </article>
+      ))}
+    </section>
   );
 }
 
